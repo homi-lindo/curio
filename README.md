@@ -12,6 +12,8 @@ path, the app shell, and the reminder scheduling contract before adding sync.
 - Task create/edit/delete with optional due date and reminder toggle.
 - Agenda search, task filters, and timeline/board display modes.
 - Global text search across tasks and notes.
+- Page zoom controls from 20% to 200% for dense agenda review and large text.
+- Inline agenda day actions for editing a selected day or adding an item to it.
 - Free-form notes editor with persisted note selection/content.
 - Note create/rename/delete plus quick task creation from a note.
 - Local notification service using `flutter_local_notifications`.

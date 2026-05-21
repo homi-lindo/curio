@@ -8,6 +8,8 @@ final class AgendaCalendar extends StatelessWidget {
     required this.selectedDate,
     required this.taskCounts,
     required this.onDateSelected,
+    required this.onAddTaskForDate,
+    required this.onEditDate,
     this.onVisibleDateChanged,
     this.throughYear = agendaThroughYear,
     this.now,
@@ -16,6 +18,8 @@ final class AgendaCalendar extends StatelessWidget {
   final DateTime selectedDate;
   final Map<DateTime, int> taskCounts;
   final ValueChanged<DateTime> onDateSelected;
+  final ValueChanged<DateTime> onAddTaskForDate;
+  final ValueChanged<DateTime> onEditDate;
   final ValueChanged<DateTime>? onVisibleDateChanged;
   final int throughYear;
   final DateTime? now;
@@ -88,7 +92,7 @@ final class AgendaCalendar extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Row(
           children: <Widget>[
             for (final label in weekdayLabels)
@@ -105,15 +109,15 @@ final class AgendaCalendar extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 7,
-            mainAxisSpacing: 6,
-            crossAxisSpacing: 6,
-            childAspectRatio: 1.16,
+            mainAxisSpacing: 4,
+            crossAxisSpacing: 4,
+            mainAxisExtent: 58,
           ),
           itemCount: totalCells,
           itemBuilder: (context, index) {
@@ -130,6 +134,8 @@ final class AgendaCalendar extends StatelessWidget {
               selected: selectedDay,
               taskCount: count,
               onTap: () => onDateSelected(date),
+              onAdd: () => onAddTaskForDate(date),
+              onEdit: () => onEditDate(date),
             );
           },
         ),
@@ -145,12 +151,16 @@ final class _CalendarDayButton extends StatelessWidget {
     required this.selected,
     required this.taskCount,
     required this.onTap,
+    required this.onAdd,
+    required this.onEdit,
   });
 
   final DateTime date;
   final bool selected;
   final int taskCount;
   final VoidCallback onTap;
+  final VoidCallback onAdd;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -163,33 +173,86 @@ final class _CalendarDayButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              Text(
-                date.day.toString(),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 2),
-              SizedBox(
-                height: 14,
-                child: taskCount == 0
-                    ? null
-                    : Text(
-                        taskCount.toString(),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: selected ? Colors.white : scheme.primary,
-                          fontWeight: FontWeight.w800,
-                        ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Text(
+                    date.day.toString(),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: foreground,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (taskCount > 0) ...<Widget>[
+                    const SizedBox(width: 4),
+                    Text(
+                      taskCount.toString(),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: selected ? Colors.white : scheme.primary,
+                        fontWeight: FontWeight.w800,
                       ),
+                    ),
+                  ],
+                ],
               ),
+              if (selected) ...<Widget>[
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    _CalendarDayAction(
+                      icon: Icons.edit_outlined,
+                      tooltip: 'Editar dia',
+                      selected: selected,
+                      onPressed: onEdit,
+                    ),
+                    const SizedBox(width: 2),
+                    _CalendarDayAction(
+                      icon: Icons.add_outlined,
+                      tooltip: 'Adicionar no dia',
+                      selected: selected,
+                      onPressed: onAdd,
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+final class _CalendarDayAction extends StatelessWidget {
+  const _CalendarDayAction({
+    required this.icon,
+    required this.tooltip,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 24, height: 22),
+      style: IconButton.styleFrom(
+        foregroundColor: selected ? Colors.white : null,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }

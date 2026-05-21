@@ -7,18 +7,26 @@ void main() {
     tester,
   ) async {
     var selected = DateTime(2026, 5, 21);
+    DateTime? addDate;
+    DateTime? editDate;
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: AgendaCalendar(
-              selectedDate: selected,
-              now: DateTime(2026, 5, 21),
-              taskCounts: <DateTime, int>{DateTime(2026, 5, 22): 2},
-              onDateSelected: (value) => selected = value,
-            ),
-          ),
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            return Scaffold(
+              body: SingleChildScrollView(
+                child: AgendaCalendar(
+                  selectedDate: selected,
+                  now: DateTime(2026, 5, 21),
+                  taskCounts: <DateTime, int>{DateTime(2026, 5, 22): 2},
+                  onDateSelected: (value) => setState(() => selected = value),
+                  onAddTaskForDate: (value) => addDate = value,
+                  onEditDate: (value) => editDate = value,
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -28,18 +36,25 @@ void main() {
     expect(find.text('Mai'), findsOneWidget);
     expect(find.text('21'), findsOneWidget);
     expect(find.text('2'), findsWidgets);
+    expect(find.byTooltip('Editar dia'), findsOneWidget);
+    expect(find.byTooltip('Adicionar no dia'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Editar dia'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Adicionar no dia'));
+    await tester.pump();
+
+    expect(editDate, DateTime(2026, 5, 21));
+    expect(addDate, DateTime(2026, 5, 21));
 
     final day22 = find.byKey(
       ValueKey<String>('agenda-day-${DateTime(2026, 5, 22).toIso8601String()}'),
     );
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(0, -280),
-    );
-    await tester.pump();
     await tester.tap(day22);
     await tester.pump();
 
     expect(selected, DateTime(2026, 5, 22));
+    expect(find.byTooltip('Editar dia'), findsOneWidget);
+    expect(find.byTooltip('Adicionar no dia'), findsOneWidget);
   });
 }

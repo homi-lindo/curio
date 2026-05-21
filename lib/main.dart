@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
@@ -64,6 +65,7 @@ final class _CurioAppState extends State<CurioApp> {
       const SyncSettingsValidator();
 
   int _selectedIndex = 0;
+  double _uiZoom = 1;
   String _taskQuery = '';
   TaskFilter _taskFilter = TaskFilter.open;
   AgendaMode _agendaMode = AgendaMode.timeline;
@@ -827,6 +829,10 @@ final class _CurioAppState extends State<CurioApp> {
     }
   }
 
+  void _setUiZoom(double value) {
+    setState(() => _uiZoom = _clampZoom(value));
+  }
+
   void _selectNote(String noteId) {
     final snapshot = _snapshot;
     if (snapshot == null) {
@@ -1304,79 +1310,97 @@ final class _CurioAppState extends State<CurioApp> {
             return const _BootScreen();
           }
 
-          return _HomeShell(
-            selectedIndex: _selectedIndex,
-            onSelect: (index) => setState(() => _selectedIndex = index),
-            onOpenSearch: _openGlobalSearch,
-            pages: <Widget>[
-              _TodayView(
-                tasks: _snapshot!.tasks,
-                busy: _busy,
-                permissionState: _permissionState,
-                lastSchedule: _lastSchedule,
-                lastNotificationLabel: _lastNotificationLabel,
-                pendingCount: _pendingCount,
-                activity: _activity,
-                onAddTask: _addTask,
-                onEditTask: _editTask,
-                onDeleteTask: _deleteTask,
-                onToggleTask: _toggleTask,
-                onRequestPermissions: _requestPermissions,
-                onScheduleOneShot: _scheduleOneShot,
-                onScheduleDaily: _scheduleDaily,
-                onScheduleWeekly: _scheduleWeekly,
-                onCancelLast: _cancelLast,
+          return CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+                  _openGlobalSearch,
+              const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                  _openGlobalSearch,
+            },
+            child: Focus(
+              autofocus: true,
+              child: _HomeShell(
+                selectedIndex: _selectedIndex,
+                zoom: _uiZoom,
+                onSelect: (index) => setState(() => _selectedIndex = index),
+                onOpenSearch: _openGlobalSearch,
+                onZoomChanged: _setUiZoom,
+                pages: <Widget>[
+                  _TodayView(
+                    tasks: _snapshot!.tasks,
+                    busy: _busy,
+                    permissionState: _permissionState,
+                    lastSchedule: _lastSchedule,
+                    lastNotificationLabel: _lastNotificationLabel,
+                    pendingCount: _pendingCount,
+                    activity: _activity,
+                    onAddTask: _addTask,
+                    onEditTask: _editTask,
+                    onDeleteTask: _deleteTask,
+                    onToggleTask: _toggleTask,
+                    onRequestPermissions: _requestPermissions,
+                    onScheduleOneShot: _scheduleOneShot,
+                    onScheduleDaily: _scheduleDaily,
+                    onScheduleWeekly: _scheduleWeekly,
+                    onCancelLast: _cancelLast,
+                  ),
+                  _AgendaView(
+                    tasks: _snapshot!.tasks,
+                    searchController: _taskSearchController,
+                    query: _taskQuery,
+                    filter: _taskFilter,
+                    mode: _agendaMode,
+                    selectedDate: _agendaDate,
+                    onAddTaskForDate: _addTaskForDate,
+                    onEditTask: _editTask,
+                    onToggleTask: _toggleTask,
+                    onQueryChanged: (value) =>
+                        setState(() => _taskQuery = value),
+                    onFilterChanged: (value) =>
+                        setState(() => _taskFilter = value),
+                    onModeChanged: (value) =>
+                        setState(() => _agendaMode = value),
+                    onVisibleDateChanged: (value) =>
+                        setState(() => _agendaDate = dateOnly(value)),
+                    onDateSelected: (value) =>
+                        setState(() => _agendaDate = dateOnly(value)),
+                    onEditDate: _openDayEditor,
+                  ),
+                  _BoardView(
+                    tasks: _snapshot!.tasks,
+                    onAddTask: _addTask,
+                    onEditTask: _editTask,
+                    onToggleTask: _toggleTask,
+                  ),
+                  _NotesView(
+                    notes: _snapshot!.notes,
+                    selectedNoteId: _selectedNoteId,
+                    controller: _noteController,
+                    onSelectNote: _selectNote,
+                    onAddNote: _addNote,
+                    onRenameNote: _renameSelectedNote,
+                    onDeleteNote: _deleteSelectedNote,
+                    onCreateTaskFromNote: _createTaskFromSelectedNote,
+                    onBodyChanged: _updateSelectedNoteBody,
+                  ),
+                  _SyncView(
+                    busy: _busy,
+                    deviceId: _deviceId,
+                    controller: _syncServerController,
+                    tokenController: _syncTokenController,
+                    settings: _syncSettings,
+                    sidecarSupported: _syncSidecarSupported,
+                    sidecarState: _syncSidecarState,
+                    lastResult: _lastSyncResult,
+                    snapshot: _snapshot!,
+                    onSave: _saveSyncSettings,
+                    onSync: _runSync,
+                    onStartSidecar: _startSyncSidecar,
+                    onStopSidecar: _stopSyncSidecar,
+                  ),
+                ],
               ),
-              _AgendaView(
-                tasks: _snapshot!.tasks,
-                searchController: _taskSearchController,
-                query: _taskQuery,
-                filter: _taskFilter,
-                mode: _agendaMode,
-                selectedDate: _agendaDate,
-                onAddTaskForDate: _addTaskForDate,
-                onEditTask: _editTask,
-                onToggleTask: _toggleTask,
-                onQueryChanged: (value) => setState(() => _taskQuery = value),
-                onFilterChanged: (value) => setState(() => _taskFilter = value),
-                onModeChanged: (value) => setState(() => _agendaMode = value),
-                onVisibleDateChanged: (value) =>
-                    setState(() => _agendaDate = dateOnly(value)),
-                onDateSelected: _openDayEditor,
-              ),
-              _BoardView(
-                tasks: _snapshot!.tasks,
-                onAddTask: _addTask,
-                onEditTask: _editTask,
-                onToggleTask: _toggleTask,
-              ),
-              _NotesView(
-                notes: _snapshot!.notes,
-                selectedNoteId: _selectedNoteId,
-                controller: _noteController,
-                onSelectNote: _selectNote,
-                onAddNote: _addNote,
-                onRenameNote: _renameSelectedNote,
-                onDeleteNote: _deleteSelectedNote,
-                onCreateTaskFromNote: _createTaskFromSelectedNote,
-                onBodyChanged: _updateSelectedNoteBody,
-              ),
-              _SyncView(
-                busy: _busy,
-                deviceId: _deviceId,
-                controller: _syncServerController,
-                tokenController: _syncTokenController,
-                settings: _syncSettings,
-                sidecarSupported: _syncSidecarSupported,
-                sidecarState: _syncSidecarState,
-                lastResult: _lastSyncResult,
-                snapshot: _snapshot!,
-                onSave: _saveSyncSettings,
-                onSync: _runSync,
-                onStartSidecar: _startSyncSidecar,
-                onStopSidecar: _stopSyncSidecar,
-              ),
-            ],
+            ),
           );
         },
       ),
@@ -1467,6 +1491,14 @@ bool _isTaskRecord(ScheduledNotificationRecord record, String taskId) {
   return record.ownerType == ReminderOwnerType.task && record.ownerId == taskId;
 }
 
+double _clampZoom(double value) {
+  return value.clamp(0.2, 2.0).toDouble();
+}
+
+String _zoomLabel(double value) {
+  return '${(_clampZoom(value) * 100).round()}%';
+}
+
 AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
   return snapshot.copyWith(
     deletedRecords: <DeletedRecord>[
@@ -1494,17 +1526,152 @@ final class _BootScreen extends StatelessWidget {
   }
 }
 
+final class _ZoomedPage extends StatelessWidget {
+  const _ZoomedPage({required this.scale, required this.child});
+
+  final double scale;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveScale = _clampZoom(scale);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!constraints.maxWidth.isFinite || !constraints.maxHeight.isFinite) {
+          return Transform.scale(
+            scale: effectiveScale,
+            alignment: Alignment.topLeft,
+            child: child,
+          );
+        }
+
+        return ClipRect(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SingleChildScrollView(
+              child: Transform.scale(
+                scale: effectiveScale,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: max(320, constraints.maxWidth / effectiveScale),
+                  height: max(480, constraints.maxHeight / effectiveScale),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+final class _ZoomRailControl extends StatelessWidget {
+  const _ZoomRailControl({required this.zoom, required this.onZoomChanged});
+
+  final double zoom;
+  final ValueChanged<double> onZoomChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          onPressed: zoom >= 2 ? null : () => onZoomChanged(zoom + 0.1),
+          icon: const Icon(Icons.zoom_in_outlined),
+          tooltip: 'Aumentar zoom',
+        ),
+        Text(
+          _zoomLabel(zoom),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        IconButton(
+          onPressed: zoom <= 0.2 ? null : () => onZoomChanged(zoom - 0.1),
+          icon: const Icon(Icons.zoom_out_outlined),
+          tooltip: 'Diminuir zoom',
+        ),
+        IconButton(
+          onPressed: zoom == 1 ? null : () => onZoomChanged(1),
+          icon: const Icon(Icons.restart_alt_outlined),
+          tooltip: 'Restaurar zoom',
+        ),
+      ],
+    );
+  }
+}
+
+final class _ZoomBottomBar extends StatelessWidget {
+  const _ZoomBottomBar({required this.zoom, required this.onZoomChanged});
+
+  final double zoom;
+  final ValueChanged<double> onZoomChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+          child: Row(
+            children: <Widget>[
+              IconButton(
+                onPressed: zoom <= 0.2 ? null : () => onZoomChanged(zoom - 0.1),
+                icon: const Icon(Icons.zoom_out_outlined),
+                tooltip: 'Diminuir zoom',
+              ),
+              Expanded(
+                child: Slider(
+                  value: _clampZoom(zoom),
+                  min: 0.2,
+                  max: 2,
+                  divisions: 18,
+                  label: _zoomLabel(zoom),
+                  onChanged: onZoomChanged,
+                ),
+              ),
+              SizedBox(
+                width: 48,
+                child: Text(
+                  _zoomLabel(zoom),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: zoom >= 2 ? null : () => onZoomChanged(zoom + 0.1),
+                icon: const Icon(Icons.zoom_in_outlined),
+                tooltip: 'Aumentar zoom',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 final class _HomeShell extends StatelessWidget {
   const _HomeShell({
     required this.selectedIndex,
+    required this.zoom,
     required this.onSelect,
     required this.onOpenSearch,
+    required this.onZoomChanged,
     required this.pages,
   });
 
   final int selectedIndex;
+  final double zoom;
   final ValueChanged<int> onSelect;
   final VoidCallback onOpenSearch;
+  final ValueChanged<double> onZoomChanged;
   final List<Widget> pages;
 
   @override
@@ -1522,7 +1689,7 @@ final class _HomeShell extends StatelessWidget {
                   selectedIndex: selectedIndex,
                   onDestinationSelected: onSelect,
                   labelType: NavigationRailLabelType.all,
-                  minWidth: 92,
+                  minWidth: 104,
                   leading: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 28),
                     child: Column(
@@ -1534,6 +1701,11 @@ final class _HomeShell extends StatelessWidget {
                           onPressed: onOpenSearch,
                           icon: const Icon(Icons.search_outlined),
                           tooltip: 'Pesquisa global',
+                        ),
+                        const SizedBox(height: 14),
+                        _ZoomRailControl(
+                          zoom: zoom,
+                          onZoomChanged: onZoomChanged,
                         ),
                       ],
                     ),
@@ -1549,31 +1721,39 @@ final class _HomeShell extends StatelessWidget {
                       .toList(),
                 ),
                 const VerticalDivider(width: 1, color: Color(0xFFE1DCD2)),
-                Expanded(child: pages[selectedIndex]),
+                Expanded(
+                  child: _ZoomedPage(scale: zoom, child: pages[selectedIndex]),
+                ),
               ],
             ),
           );
         }
 
         return Scaffold(
-          body: pages[selectedIndex],
+          body: _ZoomedPage(scale: zoom, child: pages[selectedIndex]),
           floatingActionButton: FloatingActionButton.small(
             onPressed: onOpenSearch,
             tooltip: 'Pesquisa global',
             child: const Icon(Icons.search_outlined),
           ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: selectedIndex,
-            onDestinationSelected: onSelect,
-            destinations: destinationItems
-                .map(
-                  (item) => NavigationDestination(
-                    icon: Icon(item.icon),
-                    selectedIcon: Icon(item.selectedIcon),
-                    label: item.label,
-                  ),
-                )
-                .toList(),
+          bottomNavigationBar: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              _ZoomBottomBar(zoom: zoom, onZoomChanged: onZoomChanged),
+              NavigationBar(
+                selectedIndex: selectedIndex,
+                onDestinationSelected: onSelect,
+                destinations: destinationItems
+                    .map(
+                      (item) => NavigationDestination(
+                        icon: Icon(item.icon),
+                        selectedIcon: Icon(item.selectedIcon),
+                        label: item.label,
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
           ),
         );
       },
@@ -1740,6 +1920,9 @@ final class _LogoMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const logoSize = 72.0;
+    final cacheSize = (logoSize * MediaQuery.devicePixelRatioOf(context))
+        .ceil();
     final logoAsset = Theme.of(context).brightness == Brightness.dark
         ? 'assets/brand/curio_logo_dark_1024.png'
         : 'assets/brand/curio_logo_light_1024.png';
@@ -1748,12 +1931,14 @@ final class _LogoMark extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         SizedBox(
-          width: 58,
-          height: 58,
+          width: logoSize,
+          height: logoSize,
           child: Image.asset(
             logoAsset,
             fit: BoxFit.contain,
-            filterQuality: FilterQuality.high,
+            cacheWidth: max(96, cacheSize),
+            cacheHeight: max(96, cacheSize),
+            filterQuality: FilterQuality.medium,
             semanticLabel: appDisplayName,
           ),
         ),
@@ -2083,6 +2268,7 @@ final class _AgendaView extends StatelessWidget {
     required this.onModeChanged,
     required this.onVisibleDateChanged,
     required this.onDateSelected,
+    required this.onEditDate,
   });
 
   final List<TaskItem> tasks;
@@ -2099,6 +2285,7 @@ final class _AgendaView extends StatelessWidget {
   final ValueChanged<AgendaMode> onModeChanged;
   final ValueChanged<DateTime> onVisibleDateChanged;
   final ValueChanged<DateTime> onDateSelected;
+  final ValueChanged<DateTime> onEditDate;
 
   @override
   Widget build(BuildContext context) {
@@ -2183,6 +2370,8 @@ final class _AgendaView extends StatelessWidget {
               taskCounts: countsByDate,
               onVisibleDateChanged: onVisibleDateChanged,
               onDateSelected: onDateSelected,
+              onAddTaskForDate: onAddTaskForDate,
+              onEditDate: onEditDate,
             ),
           ),
           const SizedBox(height: 14),
