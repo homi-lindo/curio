@@ -1,0 +1,9 @@
+name: lume_core
+description: Shared sync domain objects for Curió.
+publish_to: none
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  timezone: ^0.11.0

@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+
+ARG DART_IMAGE=dart:3.12.0
+
+FROM ${DART_IMAGE} AS build
+
+WORKDIR /src
+
+COPY packages/lume_core/pubspec.yaml ./packages/lume_core/pubspec.yaml
+COPY server/pubspec.yaml ./server/pubspec.yaml
+
+WORKDIR /src/server
+RUN dart pub get
+
+WORKDIR /src
+COPY packages/lume_core ./packages/lume_core
+COPY server ./server
+
+WORKDIR /src/server
+RUN mkdir -p /out \
+  && dart compile exe bin/lume_sync_server.dart -o /out/lume_sync_server
+
+FROM debian:bookworm-slim AS runtime
+
+RUN useradd --system --create-home --home-dir /home/lume lume \
+  && mkdir -p /data \
+  && chown -R lume:lume /data /home/lume
+
+COPY --from=build /out/lume_sync_server /usr/local/bin/lume_sync_server
+
+USER lume
+EXPOSE 8787
+VOLUME ["/data"]
+
+ENV LUME_SYNC_HOST=0.0.0.0 \
+  LUME_SYNC_PORT=8787 \
+  LUME_SYNC_FILE=/data/server-state.json
+
+ENTRYPOINT ["/usr/local/bin/lume_sync_server"]

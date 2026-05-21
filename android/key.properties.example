@@ -1,0 +1,4 @@
+storeFile=../../release-upload-key.jks
+storePassword=replace-with-private-store-password
+keyAlias=lume
+keyPassword=replace-with-private-key-password

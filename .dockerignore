@@ -1,0 +1,15 @@
+**/.dart_tool/
+.env
+.env.*
+.git/
+.idea/
+.lume-sync/
+**/.pub-cache/
+android/
+build/
+certs/
+coverage/
+test/
+windows/
+*.iml
+*.log
