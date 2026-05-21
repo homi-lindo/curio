@@ -180,12 +180,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\sync\package-self-h
 
 Public test artifacts are attached to GitHub Releases. The intended files are:
 
+- `curio-windows-portable-exe-*.exe` for a single-file Windows portable
+  launcher.
 - `curio-windows-portable-*.zip` for Windows testing without installing MSIX.
 - `app-release.apk` for direct Android testing outside Play.
 - `curio-sync-self-hosted-*.zip` for the optional Docker sync server kit.
 
 The Play App Bundle (`app-release.aab`) is generated locally for store upload
 and is not needed by regular testers.
+
+To build the single-file portable Windows launcher from the latest portable zip:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\windows\package-portable-exe.ps1
+```
 
 ## Store readiness
 
