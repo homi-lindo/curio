@@ -28,6 +28,21 @@ extension MarkdownFormatActionLabel on MarkdownFormatAction {
     };
   }
 
+  String get shortcutLabel {
+    return switch (this) {
+      MarkdownFormatAction.heading => 'Ctrl+Alt+1',
+      MarkdownFormatAction.bold => 'Ctrl+B',
+      MarkdownFormatAction.italic => 'Ctrl+I',
+      MarkdownFormatAction.bulletList => 'Ctrl+Shift+8',
+      MarkdownFormatAction.checklist => 'Ctrl+Shift+9',
+      MarkdownFormatAction.quote => 'Ctrl+Shift+>',
+      MarkdownFormatAction.code => 'Ctrl+`',
+      MarkdownFormatAction.link => 'Ctrl+K',
+    };
+  }
+
+  String get tooltipWithShortcut => '$tooltip ($shortcutLabel)';
+
   IconData get icon {
     return switch (this) {
       MarkdownFormatAction.heading => Icons.title_outlined,
@@ -41,6 +56,27 @@ extension MarkdownFormatActionLabel on MarkdownFormatAction {
     };
   }
 }
+
+@visibleForTesting
+const Map<ShortcutActivator, MarkdownFormatAction> markdownKeyboardShortcuts =
+    <ShortcutActivator, MarkdownFormatAction>{
+      SingleActivator(LogicalKeyboardKey.digit1, control: true, alt: true):
+          MarkdownFormatAction.heading,
+      SingleActivator(LogicalKeyboardKey.keyB, control: true):
+          MarkdownFormatAction.bold,
+      SingleActivator(LogicalKeyboardKey.keyI, control: true):
+          MarkdownFormatAction.italic,
+      SingleActivator(LogicalKeyboardKey.digit8, control: true, shift: true):
+          MarkdownFormatAction.bulletList,
+      SingleActivator(LogicalKeyboardKey.digit9, control: true, shift: true):
+          MarkdownFormatAction.checklist,
+      SingleActivator(LogicalKeyboardKey.period, control: true, shift: true):
+          MarkdownFormatAction.quote,
+      SingleActivator(LogicalKeyboardKey.backquote, control: true):
+          MarkdownFormatAction.code,
+      SingleActivator(LogicalKeyboardKey.keyK, control: true):
+          MarkdownFormatAction.link,
+    };
 
 final class MarkdownToolbar extends StatelessWidget {
   const MarkdownToolbar({
@@ -63,7 +99,7 @@ final class MarkdownToolbar extends StatelessWidget {
           IconButton(
             onPressed: enabled ? () => onAction(action) : null,
             icon: Icon(action.icon),
-            tooltip: action.tooltip,
+            tooltip: action.tooltipWithShortcut,
             visualDensity: VisualDensity.compact,
           ),
       ],
@@ -74,11 +110,13 @@ final class MarkdownToolbar extends StatelessWidget {
 final class MarkdownShortcuts extends StatelessWidget {
   const MarkdownShortcuts({
     super.key,
+    required this.enabled,
     required this.controller,
     required this.onChanged,
     required this.child,
   });
 
+  final bool enabled;
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final Widget child;
@@ -86,44 +124,16 @@ final class MarkdownShortcuts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyB, control: true): () =>
-            applyMarkdownFormat(
-              controller: controller,
-              onChanged: onChanged,
-              action: MarkdownFormatAction.bold,
-            ),
-        const SingleActivator(LogicalKeyboardKey.keyI, control: true): () =>
-            applyMarkdownFormat(
-              controller: controller,
-              onChanged: onChanged,
-              action: MarkdownFormatAction.italic,
-            ),
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
-            applyMarkdownFormat(
-              controller: controller,
-              onChanged: onChanged,
-              action: MarkdownFormatAction.link,
-            ),
-        const SingleActivator(
-          LogicalKeyboardKey.digit7,
-          control: true,
-          shift: true,
-        ): () => applyMarkdownFormat(
-          controller: controller,
-          onChanged: onChanged,
-          action: MarkdownFormatAction.bulletList,
-        ),
-        const SingleActivator(
-          LogicalKeyboardKey.keyC,
-          control: true,
-          shift: true,
-        ): () => applyMarkdownFormat(
-          controller: controller,
-          onChanged: onChanged,
-          action: MarkdownFormatAction.code,
-        ),
-      },
+      bindings: enabled
+          ? <ShortcutActivator, VoidCallback>{
+              for (final entry in markdownKeyboardShortcuts.entries)
+                entry.key: () => applyMarkdownFormat(
+                  controller: controller,
+                  onChanged: onChanged,
+                  action: entry.value,
+                ),
+            }
+          : const <ShortcutActivator, VoidCallback>{},
       child: child,
     );
   }

@@ -2691,6 +2691,7 @@ final class _NotesView extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 MarkdownShortcuts(
+                  enabled: selected != null,
                   controller: controller,
                   onChanged: onBodyChanged,
                   child: TextField(
