@@ -216,13 +216,58 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  void _toggleNotificationComposerForSelectedNote() {
+  Future<void> _openNotificationComposerForSelectedNote() async {
     final note = _selectedNote(_snapshot);
     if (note == null) {
       return;
     }
 
-    setState(() => _notificationComposerOpen = !_notificationComposerOpen);
+    if (_notificationComposerOpen) {
+      setState(() => _notificationComposerOpen = false);
+      return;
+    }
+
+    final authorized = await _ensureNotificationCreationAuthorization();
+    if (!authorized || !mounted) {
+      return;
+    }
+
+    setState(() => _notificationComposerOpen = true);
+  }
+
+  Future<bool> _ensureNotificationCreationAuthorization() async {
+    try {
+      var state = await widget.notifications.currentPermissionState();
+      if (mounted) {
+        setState(() => _permissionState = state);
+      } else {
+        _permissionState = state;
+      }
+
+      if (state.canCreateExactReminders) {
+        return true;
+      }
+
+      state = await widget.notifications.requestMissingSchedulePermissions(
+        current: state,
+      );
+      if (mounted) {
+        setState(() => _permissionState = state);
+      } else {
+        _permissionState = state;
+      }
+
+      if (state.canCreateExactReminders) {
+        _log('autorizações de notificação prontas');
+        return true;
+      }
+
+      _log('notificação não criada: ${state.authorizationBlockerLabel}');
+      return false;
+    } on Object catch (error) {
+      _log('autorizações indisponíveis: ${_errorDescriber.describe(error)}');
+      return false;
+    }
   }
 
   Future<void> _createNotificationForSelectedNote(
@@ -293,6 +338,11 @@ final class _CurioAppState extends State<CurioApp> {
       final scheduledAtUtc = draft.scheduledAtUtc.toUtc();
       if (!scheduledAtUtc.isAfter(DateTime.now().toUtc())) {
         _log('notificação ignorada: horário no passado');
+        return;
+      }
+
+      final authorized = await _ensureNotificationCreationAuthorization();
+      if (!authorized) {
         return;
       }
 
@@ -1304,8 +1354,8 @@ final class _CurioAppState extends State<CurioApp> {
                       _agendaDate = _notesDate;
                       _selectedIndex = 1;
                     }),
-                    onToggleNotificationComposer:
-                        _toggleNotificationComposerForSelectedNote,
+                    onToggleNotificationComposer: () =>
+                        unawaited(_openNotificationComposerForSelectedNote()),
                     onCreateNotification: (draft) =>
                         unawaited(_createNotificationForSelectedNote(draft)),
                     onCancelNotificationComposer: () =>

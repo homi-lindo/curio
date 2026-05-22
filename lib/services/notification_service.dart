@@ -19,6 +19,25 @@ final class NotificationPermissionState {
 
   bool get usesInexactAndroidScheduling => exactAlarmsGranted == false;
 
+  bool get canCreateExactReminders =>
+      notificationsGranted != false && exactAlarmsGranted != false;
+
+  bool get needsSystemAuthorization =>
+      notificationsGranted == false || exactAlarmsGranted == false;
+
+  String get authorizationBlockerLabel {
+    if (notificationsGranted == false && exactAlarmsGranted == false) {
+      return 'ative notificações e alarmes exatos nas autorizações do sistema';
+    }
+    if (notificationsGranted == false) {
+      return 'ative notificações nas autorizações do sistema';
+    }
+    if (exactAlarmsGranted == false) {
+      return 'ative alarmes exatos nas autorizações do sistema';
+    }
+    return 'autorizações prontas';
+  }
+
   String get label {
     final notification = notificationsGranted == null
         ? 'nativo'
@@ -130,6 +149,36 @@ final class NotificationService {
     return NotificationPermissionState(
       notificationsGranted: await android.areNotificationsEnabled(),
       exactAlarmsGranted: await android.canScheduleExactNotifications(),
+    );
+  }
+
+  Future<NotificationPermissionState> requestMissingSchedulePermissions({
+    NotificationPermissionState? current,
+  }) async {
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+
+    if (android == null) {
+      return const NotificationPermissionState();
+    }
+
+    final before = current ?? await currentPermissionState();
+    var notificationsGranted = before.notificationsGranted;
+    var exactAlarmsGranted = before.exactAlarmsGranted;
+
+    if (notificationsGranted == false) {
+      notificationsGranted = await android.requestNotificationsPermission();
+    }
+    if (exactAlarmsGranted == false) {
+      exactAlarmsGranted = await android.requestExactAlarmsPermission();
+    }
+
+    final after = await currentPermissionState();
+    return NotificationPermissionState(
+      notificationsGranted: after.notificationsGranted ?? notificationsGranted,
+      exactAlarmsGranted: after.exactAlarmsGranted ?? exactAlarmsGranted,
     );
   }
 

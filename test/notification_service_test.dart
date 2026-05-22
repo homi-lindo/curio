@@ -37,4 +37,26 @@ void main() {
     expect(denied.deliveryLabel, 'alarme aproximado');
     expect(granted.deliveryLabel, 'alarme exato');
   });
+
+  test('permission state gates exact reminder creation', () {
+    const ready = NotificationPermissionState(
+      notificationsGranted: true,
+      exactAlarmsGranted: true,
+    );
+    const notificationDenied = NotificationPermissionState(
+      notificationsGranted: false,
+      exactAlarmsGranted: true,
+    );
+    const exactDenied = NotificationPermissionState(
+      notificationsGranted: true,
+      exactAlarmsGranted: false,
+    );
+
+    expect(ready.canCreateExactReminders, isTrue);
+    expect(ready.needsSystemAuthorization, isFalse);
+    expect(notificationDenied.canCreateExactReminders, isFalse);
+    expect(notificationDenied.needsSystemAuthorization, isTrue);
+    expect(exactDenied.canCreateExactReminders, isFalse);
+    expect(exactDenied.authorizationBlockerLabel, contains('alarmes exatos'));
+  });
 }
