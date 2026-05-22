@@ -56,5 +56,13 @@ void main() {
     expect(selected, DateTime(2026, 5, 22));
     expect(find.byTooltip('Editar dia'), findsOneWidget);
     expect(find.byTooltip('Adicionar no dia'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Editar dia'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Adicionar no dia'));
+    await tester.pump();
+
+    expect(editDate, DateTime(2026, 5, 22));
+    expect(addDate, DateTime(2026, 5, 22));
   });
 }

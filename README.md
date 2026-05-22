@@ -15,7 +15,8 @@ path, the app shell, and the reminder scheduling contract before adding sync.
 - Page zoom controls from 20% to 200% for dense agenda review and large text.
 - Automatic system light/dark mode plus Aurora, Slate, and Lumen visual themes.
 - Inline agenda day actions for editing a selected day or adding an item to it.
-- Free-form notes editor with persisted note selection/content.
+- Daily-note shortcut from Agenda plus a Markdown notes editor with toolbar and
+  keyboard shortcuts.
 - Note create/rename/delete plus quick task creation from a note.
 - Local notification service using `flutter_local_notifications`.
 - Windows MSIX package with app identity for more reliable desktop toasts.

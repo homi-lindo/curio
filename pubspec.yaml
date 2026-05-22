@@ -106,7 +106,7 @@ msix_config:
   identity_name: App.Lume.Personal
   msix_version: 1.0.22.0
   capabilities: internetClient, privateNetworkClientServer
-  logo_path: android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+  logo_path: assets/brand/curio_logo_light_1024.png
   trim_logo: false
   execution_alias: curio
   install_certificate: false
