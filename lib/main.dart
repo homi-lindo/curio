@@ -12,8 +12,9 @@ import 'package:timezone/timezone.dart' as tz;
 
 import 'app_brand.dart';
 import 'services/action_error_describer.dart';
-import 'services/device_identity.dart';
+import 'services/appearance_settings_store.dart';
 import 'services/async_action_gate.dart';
+import 'services/device_identity.dart';
 import 'services/local_store.dart';
 import 'services/local_sync_sidecar.dart';
 import 'services/lume_widgets_binding.dart';
@@ -23,6 +24,7 @@ import 'services/snapshot_write_queue.dart';
 import 'services/sync_settings_store.dart';
 import 'services/sync_settings_validator.dart';
 import 'sync/http_sync_adapter.dart';
+import 'theme/curio_theme.dart';
 import 'ui/agenda_calendar.dart';
 import 'ui/task_view_helpers.dart';
 import 'ui/zoomed_page.dart';
@@ -39,14 +41,17 @@ final class CurioApp extends StatefulWidget {
     LocalStore? store,
     DeviceIdentityStore? deviceIdentity,
     SyncSettingsStore? syncSettings,
+    AppearanceSettingsStore? appearanceSettings,
   }) : store = store ?? LocalStore(),
        deviceIdentity = deviceIdentity ?? DeviceIdentityStore(),
-       syncSettings = syncSettings ?? SyncSettingsStore();
+       syncSettings = syncSettings ?? SyncSettingsStore(),
+       appearanceSettings = appearanceSettings ?? AppearanceSettingsStore();
 
   final NotificationService notifications;
   final LocalStore store;
   final DeviceIdentityStore deviceIdentity;
   final SyncSettingsStore syncSettings;
+  final AppearanceSettingsStore appearanceSettings;
 
   @override
   State<CurioApp> createState() => _CurioAppState();
@@ -74,6 +79,7 @@ final class _CurioAppState extends State<CurioApp> {
   bool _busy = false;
   String _deviceId = 'lume-${defaultTargetPlatform.name}';
   SyncSettings _syncSettings = const SyncSettings();
+  AppearanceSettings _appearance = const AppearanceSettings();
   LocalSyncSidecarState? _syncSidecarState;
   SyncResult? _lastSyncResult;
   AppSnapshot? _snapshot;
@@ -138,11 +144,13 @@ final class _CurioAppState extends State<CurioApp> {
 
     final deviceId = await widget.deviceIdentity.load();
     final syncSettings = await widget.syncSettings.load();
+    final appearance = await widget.appearanceSettings.load();
     final snapshot = await widget.store.load();
     if (mounted) {
       setState(() {
         _deviceId = deviceId;
         _syncSettings = syncSettings;
+        _appearance = appearance;
         _syncServerController.text = syncSettings.serverUrl;
         _syncTokenController.text = syncSettings.authToken;
         _snapshot = snapshot;
@@ -152,6 +160,7 @@ final class _CurioAppState extends State<CurioApp> {
     } else {
       _deviceId = deviceId;
       _syncSettings = syncSettings;
+      _appearance = appearance;
       _syncServerController.text = syncSettings.serverUrl;
       _syncTokenController.text = syncSettings.authToken;
       _snapshot = snapshot;
@@ -906,6 +915,22 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
+  Future<void> _saveAppearanceSettings(AppearanceSettings settings) async {
+    try {
+      await widget.appearanceSettings.save(settings);
+      if (mounted) {
+        setState(() => _appearance = settings);
+      } else {
+        _appearance = settings;
+      }
+      _log(
+        'aparência: ${settings.themeProfile.label} · ${settings.themeMode.label}',
+      );
+    } on Object catch (error) {
+      _log('aparência não salva: ${_errorDescriber.describe(error)}');
+    }
+  }
+
   Future<void> _runSync() async {
     await _runAction(() async {
       final snapshot = _snapshot;
@@ -1303,7 +1328,9 @@ final class _CurioAppState extends State<CurioApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: appDisplayName,
-      theme: _theme(),
+      theme: curioThemeData(_appearance.themeProfile, Brightness.light),
+      darkTheme: curioThemeData(_appearance.themeProfile, Brightness.dark),
+      themeMode: _appearance.themeMode,
       home: FutureBuilder<void>(
         future: _startup,
         builder: (context, snapshot) {
@@ -1390,11 +1417,13 @@ final class _CurioAppState extends State<CurioApp> {
                     controller: _syncServerController,
                     tokenController: _syncTokenController,
                     settings: _syncSettings,
+                    appearance: _appearance,
                     sidecarSupported: _syncSidecarSupported,
                     sidecarState: _syncSidecarState,
                     lastResult: _lastSyncResult,
                     snapshot: _snapshot!,
                     onSave: _saveSyncSettings,
+                    onAppearanceChanged: _saveAppearanceSettings,
                     onSync: _runSync,
                     onStartSidecar: _startSyncSidecar,
                     onStopSidecar: _stopSyncSidecar,
@@ -1404,51 +1433,6 @@ final class _CurioAppState extends State<CurioApp> {
             ),
           );
         },
-      ),
-    );
-  }
-
-  ThemeData _theme() {
-    const paper = Color(0xFFF6F3ED);
-    const ink = Color(0xFF252525);
-    const moss = Color(0xFF4D6B5F);
-
-    final scheme =
-        ColorScheme.fromSeed(
-          seedColor: moss,
-          brightness: Brightness.light,
-        ).copyWith(
-          surface: paper,
-          onSurface: ink,
-          primary: moss,
-          secondary: const Color(0xFF9A5B4B),
-          tertiary: const Color(0xFF396D86),
-        );
-
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: scheme,
-      scaffoldBackgroundColor: paper,
-      textTheme: Typography.blackMountainView.apply(
-        bodyColor: ink,
-        displayColor: ink,
-      ),
-      navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: paper,
-        selectedIconTheme: IconThemeData(color: scheme.primary),
-        selectedLabelTextStyle: TextStyle(color: scheme.primary),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFE2DDD3)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFE2DDD3)),
-        ),
       ),
     );
   }
@@ -1673,7 +1657,10 @@ final class _HomeShell extends StatelessWidget {
                       )
                       .toList(),
                 ),
-                const VerticalDivider(width: 1, color: Color(0xFFE1DCD2)),
+                VerticalDivider(
+                  width: 1,
+                  color: Theme.of(context).dividerColor,
+                ),
                 Expanded(
                   child: ZoomedPage(scale: zoom, child: pages[selectedIndex]),
                 ),
@@ -2612,11 +2599,13 @@ final class _SyncView extends StatelessWidget {
     required this.controller,
     required this.tokenController,
     required this.settings,
+    required this.appearance,
     required this.sidecarSupported,
     required this.sidecarState,
     required this.lastResult,
     required this.snapshot,
     required this.onSave,
+    required this.onAppearanceChanged,
     required this.onSync,
     required this.onStartSidecar,
     required this.onStopSidecar,
@@ -2627,11 +2616,13 @@ final class _SyncView extends StatelessWidget {
   final TextEditingController controller;
   final TextEditingController tokenController;
   final SyncSettings settings;
+  final AppearanceSettings appearance;
   final bool sidecarSupported;
   final LocalSyncSidecarState? sidecarState;
   final SyncResult? lastResult;
   final AppSnapshot snapshot;
   final VoidCallback onSave;
+  final ValueChanged<AppearanceSettings> onAppearanceChanged;
   final VoidCallback onSync;
   final VoidCallback onStartSidecar;
   final VoidCallback onStopSidecar;
@@ -2660,6 +2651,11 @@ final class _SyncView extends StatelessWidget {
       ),
       child: Column(
         children: <Widget>[
+          _AppearancePanel(
+            settings: appearance,
+            onChanged: onAppearanceChanged,
+          ),
+          const SizedBox(height: 14),
           _Surface(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2829,6 +2825,141 @@ final class _SyncView extends StatelessWidget {
   }
 }
 
+final class _AppearancePanel extends StatelessWidget {
+  const _AppearancePanel({required this.settings, required this.onChanged});
+
+  final AppearanceSettings settings;
+  final ValueChanged<AppearanceSettings> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Surface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const _SectionHeader(
+            icon: Icons.palette_outlined,
+            title: 'Aparência',
+          ),
+          const SizedBox(height: 14),
+          _SegmentedControlRow<ThemeMode>(
+            label: 'Modo',
+            segments: const <ButtonSegment<ThemeMode>>[
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.system,
+                icon: Icon(Icons.brightness_auto_outlined),
+                label: Text('Sistema'),
+              ),
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.light,
+                icon: Icon(Icons.light_mode_outlined),
+                label: Text('Claro'),
+              ),
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.dark,
+                icon: Icon(Icons.dark_mode_outlined),
+                label: Text('Escuro'),
+              ),
+            ],
+            selected: settings.themeMode,
+            onChanged: (themeMode) {
+              onChanged(settings.copyWith(themeMode: themeMode));
+            },
+          ),
+          const SizedBox(height: 12),
+          _SegmentedControlRow<CurioThemeProfile>(
+            label: 'Tema',
+            segments: const <ButtonSegment<CurioThemeProfile>>[
+              ButtonSegment<CurioThemeProfile>(
+                value: CurioThemeProfile.aurora,
+                icon: Icon(Icons.wb_twilight_outlined),
+                label: Text('Aurora'),
+              ),
+              ButtonSegment<CurioThemeProfile>(
+                value: CurioThemeProfile.slate,
+                icon: Icon(Icons.terminal_outlined),
+                label: Text('Slate'),
+              ),
+              ButtonSegment<CurioThemeProfile>(
+                value: CurioThemeProfile.lumen,
+                icon: Icon(Icons.auto_awesome_outlined),
+                label: Text('Lumen'),
+              ),
+            ],
+            selected: settings.themeProfile,
+            onChanged: (themeProfile) {
+              onChanged(settings.copyWith(themeProfile: themeProfile));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _SegmentedControlRow<T> extends StatelessWidget {
+  const _SegmentedControlRow({
+    required this.label,
+    required this.segments,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final String label;
+  final List<ButtonSegment<T>> segments;
+  final T selected;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 560;
+        final control = SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SegmentedButton<T>(
+            showSelectedIcon: false,
+            segments: segments,
+            selected: <T>{selected},
+            onSelectionChanged: (values) => onChanged(values.single),
+          ),
+        );
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              control,
+            ],
+          );
+        }
+
+        return Row(
+          children: <Widget>[
+            SizedBox(
+              width: 92,
+              child: Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
+            ),
+            Expanded(child: control),
+          ],
+        );
+      },
+    );
+  }
+}
+
 final class _PageFrame extends StatelessWidget {
   const _PageFrame({
     required this.title,
@@ -2871,7 +3002,11 @@ final class _PageFrame extends StatelessWidget {
                         Text(
                           subtitle,
                           style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(color: const Color(0xFF666057)),
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
                         ),
                       ],
                     ),
@@ -2896,20 +3031,24 @@ final class _Surface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE1DCD2)),
-        boxShadow: const <BoxShadow>[
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-        ],
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: isDark
+            ? null
+            : const <BoxShadow>[
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ],
       ),
       child: child,
     );
@@ -3228,22 +3367,24 @@ final class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: const Color(0xFFEDE7DC),
+        color: scheme.secondaryContainer,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 16),
+          Icon(icon, size: 16, color: scheme.onSecondaryContainer),
           const SizedBox(width: 6),
           Text(
             label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: scheme.onSecondaryContainer,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),

@@ -26,6 +26,7 @@ final class AgendaCalendar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final selected = dateOnly(selectedDate);
     final years = agendaYears(now: now, throughYear: throughYear);
     final months = List<int>.generate(12, (index) => index + 1);
@@ -103,7 +104,7 @@ final class AgendaCalendar extends StatelessWidget {
                   child: Text(
                     label,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: const Color(0xFF706A60),
+                      color: scheme.onSurfaceVariant,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -167,9 +168,9 @@ final class _CalendarDayButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final foreground = selected ? Colors.white : const Color(0xFF252525);
+    final foreground = selected ? scheme.onPrimary : scheme.onSurface;
     return Material(
-      color: selected ? scheme.primary : const Color(0xFFF8F6F1),
+      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
@@ -194,7 +195,7 @@ final class _CalendarDayButton extends StatelessWidget {
                     Text(
                       taskCount.toString(),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: selected ? Colors.white : scheme.primary,
+                        color: selected ? scheme.onPrimary : scheme.primary,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -253,7 +254,9 @@ final class _CalendarDayAction extends StatelessWidget {
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 24, height: 22),
       style: IconButton.styleFrom(
-        foregroundColor: selected ? Colors.white : null,
+        foregroundColor: selected
+            ? Theme.of(context).colorScheme.onPrimary
+            : null,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
