@@ -89,6 +89,7 @@ final class _CurioAppState extends State<CurioApp> {
   final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
+  bool _notificationComposerOpen = false;
   int _pendingCount = 0;
   final List<String> _activity = <String>[];
 
@@ -215,22 +216,31 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  Future<void> _addNotificationForSelectedNote() async {
+  void _toggleNotificationComposerForSelectedNote() {
     final note = _selectedNote(_snapshot);
     if (note == null) {
       return;
     }
 
-    final localDate = dailyNoteDate(note) ?? _notesDate;
-    final draft = await _showNotificationEditor(
-      note: note,
-      initialLocal: _defaultNotificationLocalForDate(localDate),
-    );
-    if (draft == null || draft.title.trim().isEmpty) {
+    setState(() => _notificationComposerOpen = !_notificationComposerOpen);
+  }
+
+  Future<void> _createNotificationForSelectedNote(
+    _NotificationDraft draft,
+  ) async {
+    final note = _selectedNote(_snapshot);
+    if (note == null) {
       return;
     }
 
-    await _upsertNoteNotification(note: note, draft: draft);
+    if (draft.title.trim().isEmpty) {
+      return;
+    }
+
+    final saved = await _upsertNoteNotification(note: note, draft: draft);
+    if (saved && mounted) {
+      setState(() => _notificationComposerOpen = false);
+    }
   }
 
   Future<void> _editNotification(ScheduledNotificationRecord record) async {
@@ -268,11 +278,12 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  Future<void> _upsertNoteNotification({
+  Future<bool> _upsertNoteNotification({
     required NoteItem? note,
     required _NotificationDraft draft,
     ScheduledNotificationRecord? existing,
   }) async {
+    var saved = false;
     await _runAction(() async {
       var snapshot = _snapshot;
       if (snapshot == null) {
@@ -335,12 +346,14 @@ final class _CurioAppState extends State<CurioApp> {
         note: note,
         action: existing == null ? 'criada' : 'editada',
       );
+      saved = true;
       _log(
         '${existing == null ? 'notificação criada' : 'notificação atualizada'}: '
         '${formatLocal(scheduled.plan.scheduledLocal)}',
       );
       await _refreshPendingCount();
     });
+    return saved;
   }
 
   Future<AppSnapshot> _withoutNotificationRecord(
@@ -550,6 +563,7 @@ final class _CurioAppState extends State<CurioApp> {
         _noteController.text = existing.body;
         _notesDate = selectedDate;
         _selectedIndex = 3;
+        _notificationComposerOpen = false;
       });
       _log('nota do dia aberta');
       return;
@@ -574,6 +588,7 @@ final class _CurioAppState extends State<CurioApp> {
         _noteController.text = note.body;
         _notesDate = selectedDate;
         _selectedIndex = 3;
+        _notificationComposerOpen = false;
       });
       _log('nota do dia criada');
     });
@@ -596,6 +611,7 @@ final class _CurioAppState extends State<CurioApp> {
             _notesDate =
                 dailyNoteDate(note) ?? dateOnly(record.scheduledForUtc);
             _selectedIndex = 3;
+            _notificationComposerOpen = false;
           });
           return;
         }
@@ -1282,12 +1298,18 @@ final class _CurioAppState extends State<CurioApp> {
                     noteHistory: _noteHistory,
                     selectedNoteId: _selectedNoteId,
                     selectedDate: _notesDate,
+                    notificationComposerOpen: _notificationComposerOpen,
                     controller: _noteController,
                     onOpenCalendar: () => setState(() {
                       _agendaDate = _notesDate;
                       _selectedIndex = 1;
                     }),
-                    onAddNotification: _addNotificationForSelectedNote,
+                    onToggleNotificationComposer:
+                        _toggleNotificationComposerForSelectedNote,
+                    onCreateNotification: (draft) =>
+                        unawaited(_createNotificationForSelectedNote(draft)),
+                    onCancelNotificationComposer: () =>
+                        setState(() => _notificationComposerOpen = false),
                     onEditNotification: (record) =>
                         unawaited(_editNotification(record)),
                     onCancelNotification: (record) =>
@@ -2420,9 +2442,12 @@ final class _NotesView extends StatelessWidget {
     required this.noteHistory,
     required this.selectedNoteId,
     required this.selectedDate,
+    required this.notificationComposerOpen,
     required this.controller,
     required this.onOpenCalendar,
-    required this.onAddNotification,
+    required this.onToggleNotificationComposer,
+    required this.onCreateNotification,
+    required this.onCancelNotificationComposer,
     required this.onEditNotification,
     required this.onCancelNotification,
     required this.onAddNote,
@@ -2437,9 +2462,12 @@ final class _NotesView extends StatelessWidget {
   final List<NoteEditRevision> noteHistory;
   final String? selectedNoteId;
   final DateTime selectedDate;
+  final bool notificationComposerOpen;
   final TextEditingController controller;
   final VoidCallback onOpenCalendar;
-  final VoidCallback onAddNotification;
+  final VoidCallback onToggleNotificationComposer;
+  final ValueChanged<_NotificationDraft> onCreateNotification;
+  final VoidCallback onCancelNotificationComposer;
   final ValueChanged<ScheduledNotificationRecord> onEditNotification;
   final ValueChanged<ScheduledNotificationRecord> onCancelNotification;
   final VoidCallback onAddNote;
@@ -2496,7 +2524,9 @@ final class _NotesView extends StatelessWidget {
                       ),
                     ),
                     FilledButton.tonalIcon(
-                      onPressed: selected == null ? null : onAddNotification,
+                      onPressed: selected == null
+                          ? null
+                          : onToggleNotificationComposer,
                       icon: const Icon(Icons.notification_add_outlined),
                       label: const Text('Notificação'),
                     ),
@@ -2541,6 +2571,18 @@ final class _NotesView extends StatelessWidget {
                   Text(
                     'Nota geral selecionada. O botão Calendário volta para a seleção de dias.',
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+                if (notificationComposerOpen && selected != null) ...<Widget>[
+                  const SizedBox(height: 14),
+                  _InlineNotificationComposer(
+                    key: ValueKey<String>(
+                      'notification-composer-${selected.id}',
+                    ),
+                    note: selected,
+                    selectedDate: selectedDate,
+                    onSubmit: onCreateNotification,
+                    onCancel: onCancelNotificationComposer,
                   ),
                 ],
                 const SizedBox(height: 14),
@@ -2590,6 +2632,193 @@ final class _NotesView extends StatelessWidget {
             );
             return editor;
           },
+        ),
+      ),
+    );
+  }
+}
+
+final class _InlineNotificationComposer extends StatefulWidget {
+  const _InlineNotificationComposer({
+    super.key,
+    required this.note,
+    required this.selectedDate,
+    required this.onSubmit,
+    required this.onCancel,
+  });
+
+  final NoteItem note;
+  final DateTime selectedDate;
+  final ValueChanged<_NotificationDraft> onSubmit;
+  final VoidCallback onCancel;
+
+  @override
+  State<_InlineNotificationComposer> createState() =>
+      _InlineNotificationComposerState();
+}
+
+final class _InlineNotificationComposerState
+    extends State<_InlineNotificationComposer> {
+  late final TextEditingController _titleController;
+  late final TextEditingController _bodyController;
+  late DateTime _scheduledLocal;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(
+      text: _notificationTitleFromNote(widget.note),
+    );
+    _bodyController = TextEditingController(
+      text: _notificationBodyFromNote(widget.note),
+    );
+    _scheduledLocal = _initialScheduledLocal();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _bodyController.dispose();
+    super.dispose();
+  }
+
+  DateTime _initialScheduledLocal() {
+    final sourceDate = dailyNoteDate(widget.note) ?? widget.selectedDate;
+    final candidate = _defaultNotificationLocalForDate(sourceDate);
+    if (candidate.toUtc().isAfter(DateTime.now().toUtc())) {
+      return candidate;
+    }
+    return DateTime.now().add(const Duration(hours: 1));
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _scheduledLocal,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) {
+      return;
+    }
+    setState(() {
+      _scheduledLocal = DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        _scheduledLocal.hour,
+        _scheduledLocal.minute,
+      );
+    });
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_scheduledLocal),
+    );
+    if (picked == null) {
+      return;
+    }
+    setState(() {
+      _scheduledLocal = DateTime(
+        _scheduledLocal.year,
+        _scheduledLocal.month,
+        _scheduledLocal.day,
+        picked.hour,
+        picked.minute,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = _titleController.text.trim();
+    final scheduledInFuture = _scheduledLocal.toUtc().isAfter(
+      DateTime.now().toUtc(),
+    );
+    final canSubmit = title.isNotEmpty && scheduledInFuture;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const _SectionHeader(
+              icon: Icons.notification_add_outlined,
+              title: 'Nova notificação',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _titleController,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Nome da notificação',
+                hintText: 'Texto que aparece no alerta',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _bodyController,
+              minLines: 2,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Mensagem',
+                hintText: 'Detalhe opcional',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(formatLocalDate(_scheduledLocal)),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _pickTime,
+                  icon: const Icon(Icons.schedule_outlined),
+                  label: Text(formatLocalTime(_scheduledLocal)),
+                ),
+                TextButton(
+                  onPressed: widget.onCancel,
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton.icon(
+                  onPressed: canSubmit
+                      ? () => widget.onSubmit(
+                          _NotificationDraft(
+                            title: title,
+                            body: _bodyController.text,
+                            scheduledAtUtc: _scheduledLocal.toUtc(),
+                          ),
+                        )
+                      : null,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('Salvar'),
+                ),
+              ],
+            ),
+            if (!scheduledInFuture) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                'Escolha um horário futuro para salvar a notificação.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colorScheme.error),
+              ),
+            ],
+          ],
         ),
       ),
     );
