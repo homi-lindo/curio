@@ -6,8 +6,6 @@ import 'package:timezone/timezone.dart' as tz;
 
 enum TaskFilter { open, today, scheduled, done, all }
 
-enum AgendaMode { timeline, board }
-
 const agendaThroughYear = 2035;
 
 enum GlobalSearchResultKind { task, note }
@@ -244,6 +242,42 @@ List<TaskItem> tasksDueOnDate(Iterable<TaskItem> tasks, DateTime date) {
     final dueAtUtc = task.dueAtUtc;
     return dueAtUtc != null && isSameDate(dueAtUtc, date);
   }).toList()..sort(compareTasksByAgenda);
+}
+
+String dailyNoteTitle(DateTime dateTime) {
+  return 'Diário - ${formatLocalDate(dateTime)}';
+}
+
+DateTime? dailyNoteDate(NoteItem note) {
+  final match = RegExp(
+    r'^Diário - (\d{2})/(\d{2})/(\d{4})$',
+  ).firstMatch(note.title.trim());
+  if (match == null) {
+    return null;
+  }
+
+  final day = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final year = int.tryParse(match.group(3)!);
+  if (day == null || month == null || year == null) {
+    return null;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
+    return null;
+  }
+  return DateTime(year, month, day);
+}
+
+Map<DateTime, int> noteCountsByDate(Iterable<NoteItem> notes) {
+  final counts = <DateTime, int>{};
+  for (final note in notes) {
+    final date = dailyNoteDate(note);
+    if (date == null) {
+      continue;
+    }
+    counts[date] = (counts[date] ?? 0) + 1;
+  }
+  return counts;
 }
 
 String formatLocal(tz.TZDateTime dateTime) {

@@ -7,7 +7,6 @@ void main() {
     tester,
   ) async {
     var selected = DateTime(2026, 5, 21);
-    DateTime? addDate;
     DateTime? editDate;
 
     await tester.pumpWidget(
@@ -21,7 +20,6 @@ void main() {
                   now: DateTime(2026, 5, 21),
                   taskCounts: <DateTime, int>{DateTime(2026, 5, 22): 2},
                   onDateSelected: (value) => setState(() => selected = value),
-                  onAddTaskForDate: (value) => addDate = value,
                   onEditDate: (value) => editDate = value,
                 ),
               ),
@@ -37,15 +35,12 @@ void main() {
     expect(find.text('21'), findsOneWidget);
     expect(find.text('2'), findsWidgets);
     expect(find.byTooltip('Editar dia'), findsOneWidget);
-    expect(find.byTooltip('Adicionar no dia'), findsOneWidget);
+    expect(find.byTooltip('Adicionar no dia'), findsNothing);
 
     await tester.tap(find.byTooltip('Editar dia'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Adicionar no dia'));
-    await tester.pump();
 
     expect(editDate, DateTime(2026, 5, 21));
-    expect(addDate, DateTime(2026, 5, 21));
 
     final day22 = find.byKey(
       ValueKey<String>('agenda-day-${DateTime(2026, 5, 22).toIso8601String()}'),
@@ -55,14 +50,10 @@ void main() {
 
     expect(selected, DateTime(2026, 5, 22));
     expect(find.byTooltip('Editar dia'), findsOneWidget);
-    expect(find.byTooltip('Adicionar no dia'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Editar dia'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Adicionar no dia'));
-    await tester.pump();
 
     expect(editDate, DateTime(2026, 5, 22));
-    expect(addDate, DateTime(2026, 5, 22));
   });
 }

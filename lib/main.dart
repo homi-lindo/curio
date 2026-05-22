@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
-import 'package:timezone/timezone.dart' as tz;
 
 import 'app_brand.dart';
 import 'services/action_error_describer.dart';
@@ -75,8 +74,8 @@ final class _CurioAppState extends State<CurioApp> {
   double _uiZoom = 1;
   String _taskQuery = '';
   TaskFilter _taskFilter = TaskFilter.open;
-  AgendaMode _agendaMode = AgendaMode.timeline;
   DateTime _agendaDate = dateOnly(DateTime.now());
+  DateTime _notesDate = dateOnly(DateTime.now());
   bool _busy = false;
   String _deviceId = 'lume-${defaultTargetPlatform.name}';
   SyncSettings _syncSettings = const SyncSettings();
@@ -217,79 +216,6 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  Future<void> _scheduleOneShot() async {
-    await _runAction(() async {
-      final location = widget.notifications.localLocation;
-      final now = tz.TZDateTime.now(location);
-      final fireAt = now.add(const Duration(minutes: 2));
-      final intent = ReminderIntent.oneShot(
-        id: 'demo-one-shot',
-        ownerId: 'task-payments',
-        ownerType: ReminderOwnerType.task,
-        instantUtc: fireAt.toUtc(),
-        updatedAtUtc: DateTime.now().toUtc(),
-        timeZone: widget.notifications.localTimeZoneId,
-      );
-      await _schedule(
-        intent,
-        appDisplayName,
-        'Teste rápido agendado para agora há pouco.',
-      );
-    });
-  }
-
-  Future<void> _scheduleDaily() async {
-    await _runAction(() async {
-      final location = widget.notifications.localLocation;
-      final nextMinute = tz.TZDateTime.now(
-        location,
-      ).add(const Duration(minutes: 1));
-      final intent = ReminderIntent.daily(
-        id: 'demo-daily',
-        ownerId: 'task-daily-review',
-        ownerType: ReminderOwnerType.task,
-        localTime: LocalClockTime(
-          hour: nextMinute.hour,
-          minute: nextMinute.minute,
-        ),
-        timeZone: widget.notifications.localTimeZoneId,
-        updatedAtUtc: DateTime.now().toUtc(),
-      );
-      await _schedule(
-        intent,
-        'Revisão diária',
-        'Passe rápido pela agenda de hoje.',
-      );
-    });
-  }
-
-  Future<void> _scheduleWeekly() async {
-    await _runAction(() async {
-      final location = widget.notifications.localLocation;
-      final nextMinute = tz.TZDateTime.now(
-        location,
-      ).add(const Duration(minutes: 1));
-      final intent = ReminderIntent.weekly(
-        id: 'demo-weekly',
-        ownerId: 'note-weekly-plan',
-        ownerType: ReminderOwnerType.note,
-        localTime: LocalClockTime(
-          hour: nextMinute.hour,
-          minute: nextMinute.minute,
-        ),
-        timeZone: widget.notifications.localTimeZoneId,
-        anchorLocalDate: DateTime(
-          nextMinute.year,
-          nextMinute.month,
-          nextMinute.day,
-        ),
-        byWeekday: nextMinute.weekday,
-        updatedAtUtc: DateTime.now().toUtc(),
-      );
-      await _schedule(intent, 'Planejamento semanal', 'Abra a nota da semana.');
-    });
-  }
-
   Future<void> _cancelLast() async {
     final last = _lastSchedule;
     if (last == null) {
@@ -312,56 +238,6 @@ final class _CurioAppState extends State<CurioApp> {
       _log('notificação cancelada');
       await _refreshPendingCount();
     });
-  }
-
-  Future<void> _schedule(
-    ReminderIntent intent,
-    String title,
-    String body,
-  ) async {
-    final result = await widget.notifications.scheduleReminder(
-      intent: intent,
-      deviceId: _deviceId,
-      title: title,
-      body: body,
-    );
-
-    if (result == null) {
-      _log('lembrete ignorado: ocorrência no passado');
-      return;
-    }
-
-    setState(() {
-      _lastSchedule = result;
-      _permissionState = result.permissionState;
-    });
-    final snapshot = _snapshot;
-    if (snapshot != null) {
-      await _saveSnapshot(
-        snapshot.copyWith(
-          scheduledNotifications: <ScheduledNotificationRecord>[
-            result.record,
-            ...snapshot.scheduledNotifications.where(
-              (record) => record.id != result.record.id,
-            ),
-          ],
-        ),
-      );
-    }
-    _log(
-      'lembrete agendado para ${formatLocal(result.plan.scheduledLocal)} '
-      '(${result.deliveryLabel})',
-    );
-    await _refreshPendingCount();
-  }
-
-  Future<void> _addTask() async {
-    final draft = await _showTaskEditor();
-    if (draft == null || draft.title.trim().isEmpty) {
-      return;
-    }
-
-    await _createTaskFromDraft(draft);
   }
 
   Future<void> _addTaskForDate(DateTime date) async {
@@ -417,71 +293,6 @@ final class _CurioAppState extends State<CurioApp> {
     await _runAction(() async {
       await _upsertTask(updated, existing: task);
       _log('tarefa atualizada');
-    });
-  }
-
-  Future<void> _deleteTask(TaskItem task) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Excluir tarefa'),
-          content: Text('Excluir "${task.title}"?'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Excluir'),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed != true) {
-      return;
-    }
-
-    final snapshot = _snapshot;
-    if (snapshot == null) {
-      return;
-    }
-
-    final deletedAtUtc = DateTime.now().toUtc();
-    var next = _withDeletedRecord(
-      snapshot.copyWith(
-        tasks: snapshot.tasks
-            .where((candidate) => candidate.id != task.id)
-            .toList(),
-      ),
-      DeletedRecord(
-        recordType: SyncRecordType.task,
-        recordId: task.id,
-        deletedAtUtc: deletedAtUtc,
-        deviceId: _deviceId,
-      ),
-    );
-    await _runAction(() async {
-      next = await _cancelTaskNotifications(next, task.id);
-      await _saveSnapshot(next);
-      _log('tarefa excluída');
-      await _refreshPendingCount();
-    });
-  }
-
-  Future<void> _toggleTask(TaskItem task, bool done) async {
-    final now = DateTime.now().toUtc();
-    final updated = task.copyWith(
-      status: done ? TaskStatus.done : TaskStatus.open,
-      completedAtUtc: done ? now : null,
-      clearCompletedAt: !done,
-      updatedAtUtc: now,
-    );
-    await _runAction(() async {
-      await _upsertTask(updated, existing: task);
-      await _refreshPendingCount();
     });
   }
 
@@ -749,7 +560,7 @@ final class _CurioAppState extends State<CurioApp> {
 
   Future<void> _openDailyNote(DateTime date) async {
     final selectedDate = dateOnly(date);
-    final title = 'Diário - ${formatLocalDate(selectedDate)}';
+    final title = dailyNoteTitle(selectedDate);
     final snapshot = _snapshot;
     if (snapshot == null) {
       return;
@@ -762,6 +573,7 @@ final class _CurioAppState extends State<CurioApp> {
       setState(() {
         _selectedNoteId = existing.id;
         _noteController.text = existing.body;
+        _notesDate = selectedDate;
         _selectedIndex = 3;
       });
       _log('nota do dia aberta');
@@ -785,10 +597,52 @@ final class _CurioAppState extends State<CurioApp> {
         _snapshot = next;
         _selectedNoteId = note.id;
         _noteController.text = note.body;
+        _notesDate = selectedDate;
         _selectedIndex = 3;
       });
       _log('nota do dia criada');
     });
+  }
+
+  Future<void> _openTaskDayOrEdit(TaskItem task) async {
+    final dueAtUtc = task.dueAtUtc;
+    if (dueAtUtc == null) {
+      await _editTask(task);
+      return;
+    }
+
+    await _openDailyNote(dueAtUtc);
+  }
+
+  Future<void> _openNotificationTarget(
+    ScheduledNotificationRecord record,
+  ) async {
+    switch (record.ownerType) {
+      case ReminderOwnerType.task:
+        final task = _snapshot?.tasks
+            .where((candidate) => candidate.id == record.ownerId)
+            .firstOrNull;
+        if (task != null) {
+          await _editTask(task);
+          return;
+        }
+        await _openDailyNote(record.scheduledForUtc);
+      case ReminderOwnerType.note:
+        final note = _snapshot?.notes
+            .where((candidate) => candidate.id == record.ownerId)
+            .firstOrNull;
+        if (note != null) {
+          setState(() {
+            _selectedNoteId = note.id;
+            _noteController.text = note.body;
+            _notesDate =
+                dailyNoteDate(note) ?? dateOnly(record.scheduledForUtc);
+            _selectedIndex = 3;
+          });
+          return;
+        }
+        await _openDailyNote(record.scheduledForUtc);
+    }
   }
 
   Future<void> _openDayEditor(DateTime date) async {
@@ -850,15 +704,15 @@ final class _CurioAppState extends State<CurioApp> {
                 unawaited(_openDailyNote(selectedDate));
               },
               icon: const Icon(Icons.article_outlined),
-              label: const Text('Nota'),
+              label: const Text('Editar nota'),
             ),
             FilledButton.icon(
               onPressed: () {
                 Navigator.of(dialogContext).pop();
                 unawaited(_addTaskForDate(selectedDate));
               },
-              icon: const Icon(Icons.add_task_outlined),
-              label: const Text('Adicionar'),
+              icon: const Icon(Icons.notification_add_outlined),
+              label: const Text('Adicionar alerta'),
             ),
           ],
         );
@@ -914,6 +768,7 @@ final class _CurioAppState extends State<CurioApp> {
           _selectedIndex = 3;
           _selectedNoteId = note.id;
           _noteController.text = note.body;
+          _notesDate = dailyNoteDate(note) ?? _notesDate;
         });
     }
   }
@@ -922,19 +777,8 @@ final class _CurioAppState extends State<CurioApp> {
     setState(() => _uiZoom = clampPageZoom(value));
   }
 
-  void _selectNote(String noteId) {
-    final snapshot = _snapshot;
-    if (snapshot == null) {
-      return;
-    }
-
-    final note = snapshot.notes.firstWhere(
-      (candidate) => candidate.id == noteId,
-    );
-    setState(() {
-      _selectedNoteId = note.id;
-      _noteController.text = note.body;
-    });
+  void _stepUiZoom(int steps) {
+    _setUiZoom(stepPageZoom(_uiZoom, steps));
   }
 
   NoteItem? _selectedNote(AppSnapshot? snapshot) {
@@ -1423,6 +1267,37 @@ final class _CurioAppState extends State<CurioApp> {
                   _openGlobalSearch,
               const SingleActivator(LogicalKeyboardKey.keyF, control: true):
                   _openGlobalSearch,
+              const SingleActivator(
+                LogicalKeyboardKey.equal,
+                control: true,
+              ): () =>
+                  _stepUiZoom(1),
+              const SingleActivator(
+                LogicalKeyboardKey.equal,
+                control: true,
+                shift: true,
+              ): () =>
+                  _stepUiZoom(1),
+              const SingleActivator(
+                LogicalKeyboardKey.numpadAdd,
+                control: true,
+              ): () =>
+                  _stepUiZoom(1),
+              const SingleActivator(
+                LogicalKeyboardKey.minus,
+                control: true,
+              ): () =>
+                  _stepUiZoom(-1),
+              const SingleActivator(
+                LogicalKeyboardKey.numpadSubtract,
+                control: true,
+              ): () =>
+                  _stepUiZoom(-1),
+              const SingleActivator(
+                LogicalKeyboardKey.digit0,
+                control: true,
+              ): () =>
+                  _setUiZoom(1),
             },
             child: Focus(
               autofocus: true,
@@ -1435,56 +1310,67 @@ final class _CurioAppState extends State<CurioApp> {
                 pages: <Widget>[
                   _TodayView(
                     tasks: _snapshot!.tasks,
+                    scheduledNotifications: _snapshot!.scheduledNotifications,
                     busy: _busy,
                     permissionState: _permissionState,
                     lastSchedule: _lastSchedule,
                     lastNotificationLabel: _lastNotificationLabel,
                     pendingCount: _pendingCount,
-                    activity: _activity,
-                    onAddTask: _addTask,
                     onEditTask: _editTask,
-                    onDeleteTask: _deleteTask,
-                    onToggleTask: _toggleTask,
                     onRequestPermissions: _requestPermissions,
-                    onScheduleOneShot: _scheduleOneShot,
-                    onScheduleDaily: _scheduleDaily,
-                    onScheduleWeekly: _scheduleWeekly,
                     onCancelLast: _cancelLast,
+                    onOpenNotification: (record) =>
+                        unawaited(_openNotificationTarget(record)),
                   ),
                   _AgendaView(
                     tasks: _snapshot!.tasks,
                     searchController: _taskSearchController,
                     query: _taskQuery,
                     filter: _taskFilter,
-                    mode: _agendaMode,
                     selectedDate: _agendaDate,
-                    onAddTaskForDate: _addTaskForDate,
                     onEditTask: _editTask,
-                    onToggleTask: _toggleTask,
                     onQueryChanged: (value) =>
                         setState(() => _taskQuery = value),
                     onFilterChanged: (value) =>
                         setState(() => _taskFilter = value),
-                    onModeChanged: (value) =>
-                        setState(() => _agendaMode = value),
                     onVisibleDateChanged: (value) =>
                         setState(() => _agendaDate = dateOnly(value)),
                     onDateSelected: (value) =>
                         setState(() => _agendaDate = dateOnly(value)),
                     onEditDate: _openDayEditor,
                     onOpenDailyNote: _openDailyNote,
+                    onOpenTaskDay: (task) =>
+                        unawaited(_openTaskDayOrEdit(task)),
                   ),
                   _BoardView(
                     tasks: _snapshot!.tasks,
-                    onAddTask: _addTask,
-                    onEditTask: _editTask,
-                    onToggleTask: _toggleTask,
+                    notes: _snapshot!.notes,
+                    scheduledNotifications: _snapshot!.scheduledNotifications,
+                    visibleMonth: _agendaDate,
+                    onOpenDay: _openDailyNote,
+                    onPreviousMonth: () => setState(
+                      () => _agendaDate = DateTime(
+                        _agendaDate.year,
+                        _agendaDate.month - 1,
+                      ),
+                    ),
+                    onNextMonth: () => setState(
+                      () => _agendaDate = DateTime(
+                        _agendaDate.year,
+                        _agendaDate.month + 1,
+                      ),
+                    ),
                   ),
                   _NotesView(
+                    tasks: _snapshot!.tasks,
                     notes: _snapshot!.notes,
                     selectedNoteId: _selectedNoteId,
+                    selectedDate: _notesDate,
                     controller: _noteController,
-                    onSelectNote: _selectNote,
+                    dayCounts: _dayCounts(_snapshot!),
+                    onSelectDate: _openDailyNote,
+                    onOpenDayEditor: _openDayEditor,
+                    onAddTaskForDate: _addTaskForDate,
                     onAddNote: _addNote,
                     onRenameNote: _renameSelectedNote,
                     onDeleteNote: _deleteSelectedNote,
@@ -1565,6 +1451,23 @@ AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
       ),
     ],
   );
+}
+
+Map<DateTime, int> _dayCounts(AppSnapshot snapshot) {
+  final counts = <DateTime, int>{...noteCountsByDate(snapshot.notes)};
+  for (final task in snapshot.tasks) {
+    final dueAtUtc = task.dueAtUtc;
+    if (dueAtUtc == null) {
+      continue;
+    }
+    final date = dateOnly(dueAtUtc);
+    counts[date] = (counts[date] ?? 0) + 1;
+  }
+  for (final record in snapshot.scheduledNotifications) {
+    final date = dateOnly(record.scheduledForUtc);
+    counts[date] = (counts[date] ?? 0) + 1;
+  }
+  return counts;
 }
 
 final class _BootScreen extends StatelessWidget {
@@ -1697,6 +1600,11 @@ final class _HomeShell extends StatelessWidget {
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 920;
         final destinationItems = _destinations();
+        final page = ZoomInteractionSurface(
+          scale: zoom,
+          onScaleChanged: onZoomChanged,
+          child: ZoomedPage(scale: zoom, child: pages[selectedIndex]),
+        );
 
         if (wide) {
           return Scaffold(
@@ -1743,16 +1651,14 @@ final class _HomeShell extends StatelessWidget {
                   width: 1,
                   color: Theme.of(context).dividerColor,
                 ),
-                Expanded(
-                  child: ZoomedPage(scale: zoom, child: pages[selectedIndex]),
-                ),
+                Expanded(child: page),
               ],
             ),
           );
         }
 
         return Scaffold(
-          body: ZoomedPage(scale: zoom, child: pages[selectedIndex]),
+          body: page,
           floatingActionButton: FloatingActionButton.small(
             onPressed: onOpenSearch,
             tooltip: 'Pesquisa global',
@@ -1979,39 +1885,29 @@ final class _LogoMark extends StatelessWidget {
 final class _TodayView extends StatelessWidget {
   const _TodayView({
     required this.tasks,
+    required this.scheduledNotifications,
     required this.busy,
     required this.permissionState,
     required this.lastSchedule,
     required this.lastNotificationLabel,
     required this.pendingCount,
-    required this.activity,
-    required this.onAddTask,
     required this.onEditTask,
-    required this.onDeleteTask,
-    required this.onToggleTask,
     required this.onRequestPermissions,
-    required this.onScheduleOneShot,
-    required this.onScheduleDaily,
-    required this.onScheduleWeekly,
     required this.onCancelLast,
+    required this.onOpenNotification,
   });
 
   final List<TaskItem> tasks;
+  final List<ScheduledNotificationRecord> scheduledNotifications;
   final bool busy;
   final NotificationPermissionState permissionState;
   final ScheduleResult? lastSchedule;
   final String? lastNotificationLabel;
   final int pendingCount;
-  final List<String> activity;
-  final VoidCallback onAddTask;
   final ValueChanged<TaskItem> onEditTask;
-  final ValueChanged<TaskItem> onDeleteTask;
-  final void Function(TaskItem task, bool done) onToggleTask;
   final VoidCallback onRequestPermissions;
-  final VoidCallback onScheduleOneShot;
-  final VoidCallback onScheduleDaily;
-  final VoidCallback onScheduleWeekly;
   final VoidCallback onCancelLast;
+  final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
 
   @override
   Widget build(BuildContext context) {
@@ -2029,22 +1925,19 @@ final class _TodayView extends StatelessWidget {
             _FocusPanel(
               tasks: tasks,
               lastNotificationLabel: lastNotificationLabel,
-              onAddTask: onAddTask,
               onEditTask: onEditTask,
-              onDeleteTask: onDeleteTask,
-              onToggleTask: onToggleTask,
             ),
             _NotificationPanel(
+              tasks: tasks,
+              scheduledNotifications: scheduledNotifications,
               busy: busy,
               permissionState: permissionState,
               lastSchedule: lastSchedule,
+              pendingCount: pendingCount,
               onRequestPermissions: onRequestPermissions,
-              onScheduleOneShot: onScheduleOneShot,
-              onScheduleDaily: onScheduleDaily,
-              onScheduleWeekly: onScheduleWeekly,
               onCancelLast: onCancelLast,
+              onOpenNotification: onOpenNotification,
             ),
-            _ActivityPanel(activity: activity),
           ];
 
           if (wide) {
@@ -2053,16 +1946,7 @@ final class _TodayView extends StatelessWidget {
               children: <Widget>[
                 Expanded(flex: 6, child: children[0]),
                 const SizedBox(width: 18),
-                Expanded(
-                  flex: 5,
-                  child: Column(
-                    children: <Widget>[
-                      children[1],
-                      const SizedBox(height: 18),
-                      children[2],
-                    ],
-                  ),
-                ),
+                Expanded(flex: 5, child: children[1]),
               ],
             );
           }
@@ -2072,8 +1956,6 @@ final class _TodayView extends StatelessWidget {
               children[0],
               const SizedBox(height: 16),
               children[1],
-              const SizedBox(height: 16),
-              children[2],
             ],
           );
         },
@@ -2086,61 +1968,44 @@ final class _FocusPanel extends StatelessWidget {
   const _FocusPanel({
     required this.tasks,
     required this.lastNotificationLabel,
-    required this.onAddTask,
     required this.onEditTask,
-    required this.onDeleteTask,
-    required this.onToggleTask,
   });
 
   final List<TaskItem> tasks;
   final String? lastNotificationLabel;
-  final VoidCallback onAddTask;
   final ValueChanged<TaskItem> onEditTask;
-  final ValueChanged<TaskItem> onDeleteTask;
-  final void Function(TaskItem task, bool done) onToggleTask;
 
   @override
   Widget build(BuildContext context) {
-    final visibleTasks = tasks.take(5).toList();
+    final now = DateTime.now().toUtc();
+    final visibleTasks =
+        tasks
+            .where(
+              (task) =>
+                  !task.isDone &&
+                  task.dueAtUtc != null &&
+                  !task.dueAtUtc!.isBefore(now),
+            )
+            .toList()
+          ..sort(compareTasksByAgenda);
 
     return _Surface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          _SectionHeader(
+          const _SectionHeader(
             icon: Icons.bolt_outlined,
-            title: 'Fila curta',
-            action: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const _StatusPill(
-                  icon: Icons.link_outlined,
-                  label: 'local-first',
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: onAddTask,
-                  icon: const Icon(Icons.add_task_outlined),
-                  tooltip: 'Nova tarefa',
-                ),
-              ],
-            ),
+            title: 'Próximas tarefas',
           ),
           const SizedBox(height: 18),
           if (visibleTasks.isEmpty)
             Text(
-              'Nenhuma tarefa ainda.',
+              'Nenhuma tarefa futura com horário.',
               style: Theme.of(context).textTheme.bodySmall,
             )
           else
-            for (var index = 0; index < visibleTasks.length; index++)
-              _TaskRow(
-                task: visibleTasks[index],
-                color: taskTone(index),
-                onChanged: (done) => onToggleTask(visibleTasks[index], done),
-                onEdit: () => onEditTask(visibleTasks[index]),
-                onDelete: () => onDeleteTask(visibleTasks[index]),
-              ),
+            for (final task in visibleTasks.take(8))
+              _UpcomingTaskTile(task: task, onTap: () => onEditTask(task)),
           if (lastNotificationLabel != null) ...<Widget>[
             const Divider(height: 28),
             Text(
@@ -2163,36 +2028,51 @@ final class _FocusPanel extends StatelessWidget {
 
 final class _NotificationPanel extends StatelessWidget {
   const _NotificationPanel({
+    required this.tasks,
+    required this.scheduledNotifications,
     required this.busy,
     required this.permissionState,
     required this.lastSchedule,
+    required this.pendingCount,
     required this.onRequestPermissions,
-    required this.onScheduleOneShot,
-    required this.onScheduleDaily,
-    required this.onScheduleWeekly,
     required this.onCancelLast,
+    required this.onOpenNotification,
   });
 
+  final List<TaskItem> tasks;
+  final List<ScheduledNotificationRecord> scheduledNotifications;
   final bool busy;
   final NotificationPermissionState permissionState;
   final ScheduleResult? lastSchedule;
+  final int pendingCount;
   final VoidCallback onRequestPermissions;
-  final VoidCallback onScheduleOneShot;
-  final VoidCallback onScheduleDaily;
-  final VoidCallback onScheduleWeekly;
   final VoidCallback onCancelLast;
+  final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
 
   @override
   Widget build(BuildContext context) {
     final scheduled = lastSchedule;
+    final now = DateTime.now().toUtc();
+    final active =
+        scheduledNotifications
+            .where((record) => record.scheduledForUtc.isAfter(now))
+            .toList()
+          ..sort(
+            (left, right) =>
+                left.scheduledForUtc.compareTo(right.scheduledForUtc),
+          );
 
     return _Surface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const _SectionHeader(
+          _SectionHeader(
             icon: Icons.notifications_none,
-            title: 'Notificações',
+            title: 'Notificações ativas',
+            action: _StatusPill(
+              icon: Icons.notifications_active_outlined,
+              label: '$pendingCount pendente(s)',
+            ),
           ),
           const SizedBox(height: 14),
           Text(
@@ -2209,65 +2089,28 @@ final class _NotificationPanel extends StatelessWidget {
                 icon: const Icon(Icons.verified_user_outlined),
                 label: const Text('Permissões'),
               ),
-              FilledButton.tonalIcon(
-                onPressed: busy ? null : onScheduleOneShot,
-                icon: const Icon(Icons.timer_outlined),
-                label: const Text('Teste 2 min'),
-              ),
-              OutlinedButton.icon(
-                onPressed: busy ? null : onScheduleDaily,
-                icon: const Icon(Icons.repeat_outlined),
-                label: const Text('Diário'),
-              ),
-              OutlinedButton.icon(
-                onPressed: busy ? null : onScheduleWeekly,
-                icon: const Icon(Icons.event_repeat_outlined),
-                label: const Text('Semanal'),
-              ),
               IconButton.filledTonal(
-                onPressed: busy ? null : onCancelLast,
+                onPressed: busy || scheduled == null ? null : onCancelLast,
                 icon: const Icon(Icons.notifications_off_outlined),
                 tooltip: 'Cancelar último',
               ),
             ],
           ),
-          if (scheduled != null) ...<Widget>[
-            const Divider(height: 28),
-            _MetricLine('ID', scheduled.record.id.toString()),
-            _MetricLine('Ocorrência', scheduled.plan.occurrenceKey),
-            _MetricLine('Entrega', scheduled.deliveryLabel),
-            _MetricLine('Local', formatLocal(scheduled.plan.scheduledLocal)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-final class _ActivityPanel extends StatelessWidget {
-  const _ActivityPanel({required this.activity});
-
-  final List<String> activity;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Surface(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const _SectionHeader(icon: Icons.history_outlined, title: 'Log'),
-          const SizedBox(height: 12),
-          if (activity.isEmpty)
+          if (active.isEmpty) ...<Widget>[
+            const SizedBox(height: 18),
             Text(
-              'Sem eventos nesta sessão.',
+              'Nenhuma notificação futura gravada.',
               style: Theme.of(context).textTheme.bodySmall,
-            )
-          else
-            for (final item in activity)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(item, style: Theme.of(context).textTheme.bodySmall),
+            ),
+          ] else ...<Widget>[
+            const Divider(height: 28),
+            for (final record in active.take(10))
+              _NotificationRecordTile(
+                record: record,
+                title: _notificationRecordTitle(record, tasks),
+                onTap: () => onOpenNotification(record),
               ),
+          ],
         ],
       ),
     );
@@ -2280,36 +2123,30 @@ final class _AgendaView extends StatelessWidget {
     required this.searchController,
     required this.query,
     required this.filter,
-    required this.mode,
     required this.selectedDate,
-    required this.onAddTaskForDate,
     required this.onEditTask,
-    required this.onToggleTask,
     required this.onQueryChanged,
     required this.onFilterChanged,
-    required this.onModeChanged,
     required this.onVisibleDateChanged,
     required this.onDateSelected,
     required this.onEditDate,
     required this.onOpenDailyNote,
+    required this.onOpenTaskDay,
   });
 
   final List<TaskItem> tasks;
   final TextEditingController searchController;
   final String query;
   final TaskFilter filter;
-  final AgendaMode mode;
   final DateTime selectedDate;
-  final ValueChanged<DateTime> onAddTaskForDate;
   final ValueChanged<TaskItem> onEditTask;
-  final void Function(TaskItem task, bool done) onToggleTask;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<TaskFilter> onFilterChanged;
-  final ValueChanged<AgendaMode> onModeChanged;
   final ValueChanged<DateTime> onVisibleDateChanged;
   final ValueChanged<DateTime> onDateSelected;
   final ValueChanged<DateTime> onEditDate;
   final ValueChanged<DateTime> onOpenDailyNote;
+  final ValueChanged<TaskItem> onOpenTaskDay;
 
   @override
   Widget build(BuildContext context) {
@@ -2317,18 +2154,14 @@ final class _AgendaView extends StatelessWidget {
     final timelineTasks = visibleTasks.toList()..sort(compareTasksByAgenda);
     final selectedTasks = tasksDueOnDate(visibleTasks, selectedDate);
     final countsByDate = taskCountsByDate(visibleTasks);
-    final open = visibleTasks.where((task) => !task.isDone).toList();
-    final scheduled = open.where((task) => task.dueAtUtc != null).toList();
-    final inbox = open.where((task) => task.dueAtUtc == null).toList();
-    final done = visibleTasks.where((task) => task.isDone).toList();
 
     return _PageFrame(
       title: 'Agenda',
       subtitle: '${visibleTasks.length} tarefa(s)',
-      trailing: FilledButton.icon(
-        onPressed: () => onAddTaskForDate(selectedDate),
-        icon: const Icon(Icons.add_task_outlined),
-        label: const Text('Adicionar'),
+      trailing: OutlinedButton.icon(
+        onPressed: () => onOpenDailyNote(selectedDate),
+        icon: const Icon(Icons.edit_note_outlined),
+        label: const Text('Editar em Notas'),
       ),
       child: Column(
         children: <Widget>[
@@ -2367,23 +2200,6 @@ final class _AgendaView extends StatelessWidget {
                       ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                SegmentedButton<AgendaMode>(
-                  segments: const <ButtonSegment<AgendaMode>>[
-                    ButtonSegment<AgendaMode>(
-                      value: AgendaMode.timeline,
-                      icon: Icon(Icons.view_agenda_outlined),
-                      label: Text('Linha'),
-                    ),
-                    ButtonSegment<AgendaMode>(
-                      value: AgendaMode.board,
-                      icon: Icon(Icons.view_kanban_outlined),
-                      label: Text('Quadro'),
-                    ),
-                  ],
-                  selected: <AgendaMode>{mode},
-                  onSelectionChanged: (value) => onModeChanged(value.single),
-                ),
               ],
             ),
           ),
@@ -2394,7 +2210,6 @@ final class _AgendaView extends StatelessWidget {
               taskCounts: countsByDate,
               onVisibleDateChanged: onVisibleDateChanged,
               onDateSelected: onDateSelected,
-              onAddTaskForDate: onAddTaskForDate,
               onEditDate: onEditDate,
             ),
           ),
@@ -2406,28 +2221,11 @@ final class _AgendaView extends StatelessWidget {
                 _SectionHeader(
                   icon: Icons.event_available_outlined,
                   title: formatLocalDate(selectedDate),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    OutlinedButton.icon(
-                      onPressed: () => onEditDate(selectedDate),
-                      icon: const Icon(Icons.edit_calendar_outlined),
-                      label: const Text('Editar dia'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => onOpenDailyNote(selectedDate),
-                      icon: const Icon(Icons.article_outlined),
-                      label: const Text('Nota do dia'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: () => onAddTaskForDate(selectedDate),
-                      icon: const Icon(Icons.add_outlined),
-                      label: const Text('Item do dia'),
-                    ),
-                  ],
+                  action: TextButton.icon(
+                    onPressed: () => onOpenDailyNote(selectedDate),
+                    icon: const Icon(Icons.article_outlined),
+                    label: const Text('Notas'),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 if (selectedTasks.isEmpty)
@@ -2442,68 +2240,44 @@ final class _AgendaView extends StatelessWidget {
                       title: selectedTasks[index].title,
                       subtitle: taskMeta(selectedTasks[index]),
                       tone: taskTone(index),
-                      onTap: () => onEditTask(selectedTasks[index]),
+                      onTap: () => onOpenTaskDay(selectedTasks[index]),
+                      actionTooltip: 'Abrir em Notas',
                     ),
               ],
             ),
           ),
           const SizedBox(height: 14),
-          if (mode == AgendaMode.timeline)
-            _Surface(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  if (timelineTasks.isEmpty)
-                    Text(
-                      'Nada encontrado.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    )
-                  else
-                    for (var index = 0; index < timelineTasks.length; index++)
-                      _TimelineRow(
-                        time: timelineLabel(timelineTasks[index]),
-                        title: timelineTasks[index].title,
-                        subtitle: taskMeta(timelineTasks[index]),
-                        tone: taskTone(index),
-                        onTap: () => onEditTask(timelineTasks[index]),
-                      ),
-                ],
-              ),
-            )
-          else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final columns = constraints.maxWidth >= 820 ? 3 : 1;
-                return GridView.count(
-                  crossAxisCount: columns,
-                  mainAxisSpacing: 14,
-                  crossAxisSpacing: 14,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: columns == 1 ? 3.2 : 1.08,
-                  children: <Widget>[
-                    _BoardColumn(
-                      title: 'Entrada',
-                      items: inbox,
-                      onEditTask: onEditTask,
-                      onToggleTask: onToggleTask,
+          _Surface(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const _SectionHeader(
+                  icon: Icons.timeline_outlined,
+                  title: 'Linha',
+                ),
+                const SizedBox(height: 12),
+                if (timelineTasks.isEmpty)
+                  Text(
+                    'Nada encontrado.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                else
+                  for (var index = 0; index < timelineTasks.length; index++)
+                    _TimelineRow(
+                      time: timelineLabel(timelineTasks[index]),
+                      title: timelineTasks[index].title,
+                      subtitle: taskMeta(timelineTasks[index]),
+                      tone: taskTone(index),
+                      onTap: () => timelineTasks[index].dueAtUtc == null
+                          ? onEditTask(timelineTasks[index])
+                          : onOpenTaskDay(timelineTasks[index]),
+                      actionTooltip: timelineTasks[index].dueAtUtc == null
+                          ? 'Editar tarefa'
+                          : 'Abrir em Notas',
                     ),
-                    _BoardColumn(
-                      title: 'Com horário',
-                      items: scheduled,
-                      onEditTask: onEditTask,
-                      onToggleTask: onToggleTask,
-                    ),
-                    _BoardColumn(
-                      title: 'Feito',
-                      items: done,
-                      onEditTask: onEditTask,
-                      onToggleTask: onToggleTask,
-                    ),
-                  ],
-                );
-              },
+              ],
             ),
+          ),
         ],
       ),
     );
@@ -2513,60 +2287,91 @@ final class _AgendaView extends StatelessWidget {
 final class _BoardView extends StatelessWidget {
   const _BoardView({
     required this.tasks,
-    required this.onAddTask,
-    required this.onEditTask,
-    required this.onToggleTask,
+    required this.notes,
+    required this.scheduledNotifications,
+    required this.visibleMonth,
+    required this.onOpenDay,
+    required this.onPreviousMonth,
+    required this.onNextMonth,
   });
 
   final List<TaskItem> tasks;
-  final VoidCallback onAddTask;
-  final ValueChanged<TaskItem> onEditTask;
-  final void Function(TaskItem task, bool done) onToggleTask;
+  final List<NoteItem> notes;
+  final List<ScheduledNotificationRecord> scheduledNotifications;
+  final DateTime visibleMonth;
+  final ValueChanged<DateTime> onOpenDay;
+  final VoidCallback onPreviousMonth;
+  final VoidCallback onNextMonth;
 
   @override
   Widget build(BuildContext context) {
-    final open = tasks.where((task) => !task.isDone).toList();
-    final done = tasks.where((task) => task.isDone).toList();
-    final timed = open.where((task) => task.dueAtUtc != null).toList();
+    final month = DateTime(visibleMonth.year, visibleMonth.month);
+    final digests = _dayDigests(
+      tasks: tasks,
+      notes: notes,
+      notifications: scheduledNotifications,
+      month: month,
+    );
 
     return _PageFrame(
       title: 'Quadro',
-      subtitle: 'Kanban simples',
-      trailing: FilledButton.icon(
-        onPressed: onAddTask,
-        icon: const Icon(Icons.add_task_outlined),
-        label: const Text('Adicionar'),
+      subtitle: '${monthLabel(month.month)} ${month.year}',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          IconButton(
+            onPressed: onPreviousMonth,
+            icon: const Icon(Icons.chevron_left_outlined),
+            tooltip: 'Mês anterior',
+          ),
+          Text(
+            '${monthLabel(month.month)} ${month.year}',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          IconButton(
+            onPressed: onNextMonth,
+            icon: const Icon(Icons.chevron_right_outlined),
+            tooltip: 'Próximo mês',
+          ),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final columns = constraints.maxWidth >= 820 ? 3 : 1;
-          return GridView.count(
-            crossAxisCount: columns,
-            mainAxisSpacing: 14,
-            crossAxisSpacing: 14,
+          final columns = constraints.maxWidth >= 1060
+              ? 4
+              : constraints.maxWidth >= 760
+              ? 3
+              : constraints.maxWidth >= 520
+              ? 2
+              : 1;
+          if (digests.isEmpty) {
+            return _Surface(
+              child: Text(
+                'Nenhum dia com notas ou alertas neste mês.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            );
+          }
+
+          return GridView.builder(
+            itemCount: digests.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 14,
+              childAspectRatio: columns == 1 ? 4.2 : 2.05,
+            ),
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: columns == 1 ? 3.3 : 1.12,
-            children: <Widget>[
-              _BoardColumn(
-                title: 'Entrada',
-                items: open.where((task) => task.dueAtUtc == null).toList(),
-                onEditTask: onEditTask,
-                onToggleTask: onToggleTask,
-              ),
-              _BoardColumn(
-                title: 'Hoje',
-                items: timed,
-                onEditTask: onEditTask,
-                onToggleTask: onToggleTask,
-              ),
-              _BoardColumn(
-                title: 'Feito',
-                items: done,
-                onEditTask: onEditTask,
-                onToggleTask: onToggleTask,
-              ),
-            ],
+            itemBuilder: (context, index) {
+              final digest = digests[index];
+              return _DayBoardCard(
+                digest: digest,
+                onTap: () => onOpenDay(digest.date),
+              );
+            },
           );
         },
       ),
@@ -2574,12 +2379,196 @@ final class _BoardView extends StatelessWidget {
   }
 }
 
+final class _DayDigest {
+  const _DayDigest({
+    required this.date,
+    required this.notes,
+    required this.tasks,
+    required this.notifications,
+  });
+
+  final DateTime date;
+  final List<NoteItem> notes;
+  final List<TaskItem> tasks;
+  final List<ScheduledNotificationRecord> notifications;
+
+  int get alertCount {
+    final owners = <String>{
+      for (final task in tasks) 'task:${task.id}',
+      for (final notification in notifications)
+        '${notification.ownerType.name}:${notification.ownerId}',
+    };
+    return owners.length;
+  }
+
+  int get count => notes.length + alertCount;
+}
+
+List<_DayDigest> _dayDigests({
+  required List<TaskItem> tasks,
+  required List<NoteItem> notes,
+  required List<ScheduledNotificationRecord> notifications,
+  required DateTime month,
+}) {
+  final dates = <DateTime>{};
+
+  final notesByDate = <DateTime, List<NoteItem>>{};
+  for (final note in notes) {
+    final date = dailyNoteDate(note);
+    if (date == null || !_isSameMonth(date, month)) {
+      continue;
+    }
+    dates.add(date);
+    notesByDate.putIfAbsent(date, () => <NoteItem>[]).add(note);
+  }
+
+  final tasksByDate = <DateTime, List<TaskItem>>{};
+  for (final task in tasks) {
+    final dueAtUtc = task.dueAtUtc;
+    if (dueAtUtc == null || task.isDone || !task.reminderEnabled) {
+      continue;
+    }
+    final date = dateOnly(dueAtUtc);
+    if (!_isSameMonth(date, month)) {
+      continue;
+    }
+    dates.add(date);
+    tasksByDate.putIfAbsent(date, () => <TaskItem>[]).add(task);
+  }
+
+  final notificationsByDate = <DateTime, List<ScheduledNotificationRecord>>{};
+  for (final notification in notifications) {
+    final date = dateOnly(notification.scheduledForUtc);
+    if (!_isSameMonth(date, month)) {
+      continue;
+    }
+    dates.add(date);
+    notificationsByDate
+        .putIfAbsent(date, () => <ScheduledNotificationRecord>[])
+        .add(notification);
+  }
+
+  final sortedDates = dates.toList()..sort();
+  return <_DayDigest>[
+    for (final date in sortedDates)
+      _DayDigest(
+        date: date,
+        notes: notesByDate[date] ?? const <NoteItem>[],
+        tasks: tasksByDate[date] ?? const <TaskItem>[],
+        notifications:
+            notificationsByDate[date] ?? const <ScheduledNotificationRecord>[],
+      ),
+  ];
+}
+
+bool _isSameMonth(DateTime date, DateTime month) {
+  return date.year == month.year && date.month == month.month;
+}
+
+final class _DayBoardCard extends StatelessWidget {
+  const _DayBoardCard({required this.digest, required this.onTap});
+
+  final _DayDigest digest;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: scheme.outlineVariant),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        formatLocalDate(digest.date),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    _StatusPill(
+                      icon: Icons.edit_notifications_outlined,
+                      label: digest.count.toString(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _CardMetricLine('Notas', digest.notes.length.toString()),
+                _CardMetricLine('Alertas', digest.alertCount.toString()),
+                const Spacer(),
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: Text(
+                    'Abrir em Notas',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _CardMetricLine extends StatelessWidget {
+  const _CardMetricLine(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 68,
+            child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 final class _NotesView extends StatelessWidget {
   const _NotesView({
+    required this.tasks,
     required this.notes,
     required this.selectedNoteId,
+    required this.selectedDate,
     required this.controller,
-    required this.onSelectNote,
+    required this.dayCounts,
+    required this.onSelectDate,
+    required this.onOpenDayEditor,
+    required this.onAddTaskForDate,
     required this.onAddNote,
     required this.onRenameNote,
     required this.onDeleteNote,
@@ -2587,10 +2576,15 @@ final class _NotesView extends StatelessWidget {
     required this.onBodyChanged,
   });
 
+  final List<TaskItem> tasks;
   final List<NoteItem> notes;
   final String? selectedNoteId;
+  final DateTime selectedDate;
   final TextEditingController controller;
-  final ValueChanged<String> onSelectNote;
+  final Map<DateTime, int> dayCounts;
+  final ValueChanged<DateTime> onSelectDate;
+  final ValueChanged<DateTime> onOpenDayEditor;
+  final ValueChanged<DateTime> onAddTaskForDate;
   final VoidCallback onAddNote;
   final VoidCallback onRenameNote;
   final VoidCallback onDeleteNote;
@@ -2602,108 +2596,140 @@ final class _NotesView extends StatelessWidget {
     final selected = notes
         .where((note) => note.id == selectedNoteId)
         .firstOrNull;
+    final dayTasks = tasksDueOnDate(tasks, selectedDate);
+    final dailyTitle = dailyNoteTitle(selectedDate);
+    final isDailyNote = selected != null && dailyNoteDate(selected) != null;
 
     return _PageFrame(
       title: 'Notas',
-      subtitle: 'Editor livre',
+      subtitle: formatLocalDate(selectedDate),
       trailing: const _StatusPill(
         icon: Icons.article_outlined,
         label: 'Markdown',
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _Surface(
-            child: Row(
+      child: _Surface(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 980;
+            final calendar = AgendaCalendar(
+              selectedDate: selectedDate,
+              taskCounts: dayCounts,
+              onDateSelected: onSelectDate,
+              onEditDate: onOpenDayEditor,
+            );
+            final editor = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Expanded(
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      for (final note in notes)
-                        ChoiceChip(
-                          label: Text(note.title),
-                          selected: note.id == selectedNoteId,
-                          onSelected: (_) => onSelectNote(note.id),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                IconButton.filledTonal(
-                  onPressed: onAddNote,
-                  icon: const Icon(Icons.note_add_outlined),
-                  tooltip: 'Nova nota',
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          if (selected != null) ...<Widget>[
-            _Surface(
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      selected.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            selected?.title ?? dailyTitle,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            dayTasks.isEmpty
+                                ? 'Sem alerta neste dia'
+                                : '${dayTasks.length} alerta(s) neste dia',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  IconButton(
-                    onPressed: onRenameNote,
-                    icon: const Icon(Icons.drive_file_rename_outline),
-                    tooltip: 'Renomear nota',
-                  ),
-                  IconButton(
-                    onPressed: onCreateTaskFromNote,
-                    icon: const Icon(Icons.add_task_outlined),
-                    tooltip: 'Criar tarefa desta nota',
-                  ),
-                  IconButton(
-                    onPressed: onDeleteNote,
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Excluir nota',
+                    IconButton(
+                      onPressed: () => onOpenDayEditor(selectedDate),
+                      icon: const Icon(Icons.edit_calendar_outlined),
+                      tooltip: 'Editar dia',
+                    ),
+                    IconButton.filledTonal(
+                      onPressed: () => onAddTaskForDate(selectedDate),
+                      icon: const Icon(Icons.notification_add_outlined),
+                      tooltip: 'Adicionar alerta',
+                    ),
+                    IconButton(
+                      onPressed: onAddNote,
+                      icon: const Icon(Icons.note_add_outlined),
+                      tooltip: 'Nova nota geral',
+                    ),
+                    IconButton(
+                      onPressed: selected == null ? null : onRenameNote,
+                      icon: const Icon(Icons.drive_file_rename_outline),
+                      tooltip: 'Renomear nota',
+                    ),
+                    IconButton(
+                      onPressed: selected == null ? null : onCreateTaskFromNote,
+                      icon: const Icon(Icons.add_task_outlined),
+                      tooltip: 'Criar tarefa desta nota',
+                    ),
+                    IconButton(
+                      onPressed: selected == null ? null : onDeleteNote,
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Excluir nota',
+                    ),
+                  ],
+                ),
+                if (!isDailyNote && selected != null) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Nota geral selecionada. Use o calendário para abrir ou criar o diário de um dia.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
-              ),
-            ),
-            const SizedBox(height: 14),
-          ],
-          _Surface(
-            child: MarkdownToolbar(
-              enabled: selected != null,
-              onAction: (action) => applyMarkdownFormat(
-                controller: controller,
-                onChanged: onBodyChanged,
-                action: action,
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          MarkdownShortcuts(
-            controller: controller,
-            onChanged: onBodyChanged,
-            child: TextField(
-              controller: controller,
-              enabled: selected != null,
-              onChanged: onBodyChanged,
-              minLines: 18,
-              maxLines: 32,
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              style: const TextStyle(fontSize: 15, height: 1.45),
-              decoration: InputDecoration(
-                hintText: selected == null
-                    ? 'Crie uma nota para começar.'
-                    : 'Escreva em Markdown.',
-                alignLabelWithHint: true,
-              ),
-            ),
-          ),
-        ],
+                const SizedBox(height: 14),
+                MarkdownToolbar(
+                  enabled: selected != null,
+                  onAction: (action) => applyMarkdownFormat(
+                    controller: controller,
+                    onChanged: onBodyChanged,
+                    action: action,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                MarkdownShortcuts(
+                  controller: controller,
+                  onChanged: onBodyChanged,
+                  child: TextField(
+                    controller: controller,
+                    enabled: selected != null,
+                    onChanged: onBodyChanged,
+                    minLines: wide ? 22 : 14,
+                    maxLines: wide ? 36 : 28,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    style: const TextStyle(fontSize: 15, height: 1.45),
+                    decoration: InputDecoration(
+                      hintText: selected == null
+                          ? 'Escolha um dia no calendário para criar a nota.'
+                          : 'Escreva em Markdown.',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ),
+              ],
+            );
+
+            if (wide) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SizedBox(width: 360, child: calendar),
+                  const SizedBox(width: 18),
+                  Expanded(child: editor),
+                ],
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[calendar, const SizedBox(height: 18), editor],
+            );
+          },
+        ),
       ),
     );
   }
@@ -3199,76 +3225,122 @@ final class _SectionHeader extends StatelessWidget {
   }
 }
 
-final class _TaskRow extends StatelessWidget {
-  const _TaskRow({
-    required this.task,
-    required this.color,
-    required this.onChanged,
-    required this.onEdit,
-    required this.onDelete,
-  });
+final class _UpcomingTaskTile extends StatelessWidget {
+  const _UpcomingTaskTile({required this.task, required this.onTap});
 
   final TaskItem task;
-  final Color color;
-  final ValueChanged<bool> onChanged;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final done = task.isDone;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 12,
-            height: 42,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(6),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  task.title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    decoration: done ? TextDecoration.lineThrough : null,
-                  ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                Icons.event_available_outlined,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      task.title,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      taskMeta(task),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  taskMeta(task),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
+              ),
+              const Icon(Icons.open_in_new_outlined, size: 18),
+            ],
           ),
-          Checkbox(
-            value: done,
-            onChanged: (value) => onChanged(value ?? false),
-            activeColor: color,
-          ),
-          IconButton(
-            onPressed: onEdit,
-            icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Editar tarefa',
-          ),
-          IconButton(
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Excluir tarefa',
-          ),
-        ],
+        ),
       ),
     );
   }
+}
+
+final class _NotificationRecordTile extends StatelessWidget {
+  const _NotificationRecordTile({
+    required this.record,
+    required this.title,
+    required this.onTap,
+  });
+
+  final ScheduledNotificationRecord record;
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ownerLabel = switch (record.ownerType) {
+      ReminderOwnerType.task => 'Tarefa',
+      ReminderOwnerType.note => 'Nota',
+    };
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                Icons.alarm_on_outlined,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '$ownerLabel · ${formatLocalDateTime(record.scheduledForUtc)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.open_in_new_outlined, size: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _notificationRecordTitle(
+  ScheduledNotificationRecord record,
+  List<TaskItem> tasks,
+) {
+  if (record.ownerType == ReminderOwnerType.task) {
+    final task = tasks
+        .where((candidate) => candidate.id == record.ownerId)
+        .firstOrNull;
+    return task?.title ?? record.ownerId;
+  }
+
+  return record.ownerId;
 }
 
 final class _MetricLine extends StatelessWidget {
@@ -3308,6 +3380,7 @@ final class _TimelineRow extends StatelessWidget {
     this.subtitle,
     required this.tone,
     this.onTap,
+    this.actionTooltip = 'Editar tarefa',
   });
 
   final String time;
@@ -3315,6 +3388,7 @@ final class _TimelineRow extends StatelessWidget {
   final String? subtitle;
   final Color tone;
   final VoidCallback? onTap;
+  final String actionTooltip;
 
   @override
   Widget build(BuildContext context) {
@@ -3357,7 +3431,7 @@ final class _TimelineRow extends StatelessWidget {
           IconButton(
             onPressed: onTap,
             icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Editar tarefa',
+            tooltip: actionTooltip,
           ),
         ],
       ],
@@ -3379,107 +3453,6 @@ final class _TimelineRow extends StatelessWidget {
                 ),
               ),
             ),
-    );
-  }
-}
-
-final class _BoardTaskTile extends StatelessWidget {
-  const _BoardTaskTile({
-    required this.task,
-    required this.onEditTask,
-    required this.onToggleTask,
-  });
-
-  final TaskItem task;
-  final ValueChanged<TaskItem> onEditTask;
-  final void Function(TaskItem task, bool done) onToggleTask;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => onEditTask(task),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: <Widget>[
-              Checkbox(
-                value: task.isDone,
-                onChanged: (value) => onToggleTask(task, value ?? false),
-                visualDensity: VisualDensity.compact,
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      task.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      taskMeta(task),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                onPressed: () => onEditTask(task),
-                icon: const Icon(Icons.edit_outlined),
-                tooltip: 'Editar',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _BoardColumn extends StatelessWidget {
-  const _BoardColumn({
-    required this.title,
-    required this.items,
-    required this.onEditTask,
-    required this.onToggleTask,
-  });
-
-  final String title;
-  final List<TaskItem> items;
-  final ValueChanged<TaskItem> onEditTask;
-  final void Function(TaskItem task, bool done) onToggleTask;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Surface(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 12),
-          if (items.isEmpty)
-            Text('Vazio', style: Theme.of(context).textTheme.bodySmall)
-          else
-            for (final item in items)
-              _BoardTaskTile(
-                task: item,
-                onEditTask: onEditTask,
-                onToggleTask: onToggleTask,
-              ),
-        ],
-      ),
     );
   }
 }

@@ -8,7 +8,6 @@ final class AgendaCalendar extends StatelessWidget {
     required this.selectedDate,
     required this.taskCounts,
     required this.onDateSelected,
-    required this.onAddTaskForDate,
     required this.onEditDate,
     this.onVisibleDateChanged,
     this.throughYear = agendaThroughYear,
@@ -18,7 +17,6 @@ final class AgendaCalendar extends StatelessWidget {
   final DateTime selectedDate;
   final Map<DateTime, int> taskCounts;
   final ValueChanged<DateTime> onDateSelected;
-  final ValueChanged<DateTime> onAddTaskForDate;
   final ValueChanged<DateTime> onEditDate;
   final ValueChanged<DateTime>? onVisibleDateChanged;
   final int throughYear;
@@ -35,7 +33,7 @@ final class AgendaCalendar extends StatelessWidget {
     final totalCells = leadingBlanks + dayCount;
     final navigate = onVisibleDateChanged ?? onDateSelected;
     final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final dayExtent = 58 + ((textScale - 1) * 30).clamp(0, 42).toDouble();
+    final dayExtent = 50 + ((textScale - 1) * 28).clamp(0, 40).toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -137,7 +135,6 @@ final class AgendaCalendar extends StatelessWidget {
               selected: selectedDay,
               taskCount: count,
               onTap: () => onDateSelected(date),
-              onAdd: () => onAddTaskForDate(date),
               onEdit: () => onEditDate(date),
             );
           },
@@ -154,7 +151,6 @@ final class _CalendarDayButton extends StatelessWidget {
     required this.selected,
     required this.taskCount,
     required this.onTap,
-    required this.onAdd,
     required this.onEdit,
   });
 
@@ -162,7 +158,6 @@ final class _CalendarDayButton extends StatelessWidget {
   final bool selected;
   final int taskCount;
   final VoidCallback onTap;
-  final VoidCallback onAdd;
   final VoidCallback onEdit;
 
   @override
@@ -204,23 +199,11 @@ final class _CalendarDayButton extends StatelessWidget {
               ),
               if (selected) ...<Widget>[
                 const SizedBox(height: 2),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    _CalendarDayAction(
-                      icon: Icons.edit_outlined,
-                      tooltip: 'Editar dia',
-                      selected: selected,
-                      onPressed: onEdit,
-                    ),
-                    const SizedBox(width: 2),
-                    _CalendarDayAction(
-                      icon: Icons.add_outlined,
-                      tooltip: 'Adicionar no dia',
-                      selected: selected,
-                      onPressed: onAdd,
-                    ),
-                  ],
+                _CalendarDayAction(
+                  icon: Icons.edit_outlined,
+                  tooltip: 'Editar dia',
+                  selected: selected,
+                  onPressed: onEdit,
                 ),
               ],
             ],
