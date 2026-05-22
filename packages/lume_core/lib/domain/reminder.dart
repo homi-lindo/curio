@@ -154,6 +154,8 @@ final class ScheduledNotificationRecord {
     required this.occurrenceKey,
     required this.scheduledForUtc,
     required this.payload,
+    this.title = '',
+    this.body = '',
     this.scheduledTimeZone = '',
   });
 
@@ -171,6 +173,8 @@ final class ScheduledNotificationRecord {
         json['scheduledForUtc'] as String,
       ).toUtc(),
       payload: json['payload'] as String,
+      title: json['title'] as String? ?? '',
+      body: json['body'] as String? ?? '',
       scheduledTimeZone: json['scheduledTimeZone'] as String? ?? '',
     );
   }
@@ -183,6 +187,8 @@ final class ScheduledNotificationRecord {
   final String occurrenceKey;
   final DateTime scheduledForUtc;
   final String payload;
+  final String title;
+  final String body;
   final String scheduledTimeZone;
 
   Map<String, Object?> toJson() {
@@ -195,6 +201,8 @@ final class ScheduledNotificationRecord {
       'occurrenceKey': occurrenceKey,
       'scheduledForUtc': scheduledForUtc.toUtc().toIso8601String(),
       'payload': payload,
+      'title': title,
+      'body': body,
       'scheduledTimeZone': scheduledTimeZone,
     };
   }

@@ -17,6 +17,7 @@ import 'services/device_identity.dart';
 import 'services/local_store.dart';
 import 'services/local_sync_sidecar.dart';
 import 'services/lume_widgets_binding.dart';
+import 'services/note_edit_history_store.dart';
 import 'services/notification_service.dart';
 import 'services/notification_timezone_audit.dart';
 import 'services/snapshot_write_queue.dart';
@@ -42,16 +43,19 @@ final class CurioApp extends StatefulWidget {
     DeviceIdentityStore? deviceIdentity,
     SyncSettingsStore? syncSettings,
     AppearanceSettingsStore? appearanceSettings,
+    NoteEditHistoryStore? noteHistory,
   }) : store = store ?? LocalStore(),
        deviceIdentity = deviceIdentity ?? DeviceIdentityStore(),
        syncSettings = syncSettings ?? SyncSettingsStore(),
-       appearanceSettings = appearanceSettings ?? AppearanceSettingsStore();
+       appearanceSettings = appearanceSettings ?? AppearanceSettingsStore(),
+       noteHistory = noteHistory ?? NoteEditHistoryStore();
 
   final NotificationService notifications;
   final LocalStore store;
   final DeviceIdentityStore deviceIdentity;
   final SyncSettingsStore syncSettings;
   final AppearanceSettingsStore appearanceSettings;
+  final NoteEditHistoryStore noteHistory;
 
   @override
   State<CurioApp> createState() => _CurioAppState();
@@ -60,7 +64,6 @@ final class CurioApp extends StatefulWidget {
 final class _CurioAppState extends State<CurioApp> {
   late final Future<void> _startup;
   late final TextEditingController _noteController;
-  late final TextEditingController _taskSearchController;
   late final TextEditingController _syncServerController;
   late final TextEditingController _syncTokenController;
   late final LocalSyncSidecar _syncSidecar;
@@ -72,8 +75,6 @@ final class _CurioAppState extends State<CurioApp> {
 
   int _selectedIndex = 0;
   double _uiZoom = 1;
-  String _taskQuery = '';
-  TaskFilter _taskFilter = TaskFilter.open;
   DateTime _agendaDate = dateOnly(DateTime.now());
   DateTime _notesDate = dateOnly(DateTime.now());
   bool _busy = false;
@@ -84,6 +85,8 @@ final class _CurioAppState extends State<CurioApp> {
   SyncResult? _lastSyncResult;
   AppSnapshot? _snapshot;
   String? _selectedNoteId;
+  List<NoteEditRevision> _noteHistory = const <NoteEditRevision>[];
+  final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
   ScheduleResult? _lastSchedule;
@@ -95,7 +98,6 @@ final class _CurioAppState extends State<CurioApp> {
   void initState() {
     super.initState();
     _noteController = TextEditingController();
-    _taskSearchController = TextEditingController();
     _syncServerController = TextEditingController();
     _syncTokenController = TextEditingController();
     _snapshotWrites = SnapshotWriteQueue(saveSnapshot: widget.store.save);
@@ -114,7 +116,6 @@ final class _CurioAppState extends State<CurioApp> {
   @override
   void dispose() {
     _noteController.dispose();
-    _taskSearchController.dispose();
     _syncServerController.dispose();
     _syncTokenController.dispose();
     unawaited(_syncSidecar.stop());
@@ -145,6 +146,7 @@ final class _CurioAppState extends State<CurioApp> {
     final deviceId = await widget.deviceIdentity.load();
     final syncSettings = await widget.syncSettings.load();
     final appearance = await widget.appearanceSettings.load();
+    final noteHistory = await widget.noteHistory.load();
     final snapshot = await widget.store.load();
     if (mounted) {
       setState(() {
@@ -154,6 +156,7 @@ final class _CurioAppState extends State<CurioApp> {
         _syncServerController.text = syncSettings.serverUrl;
         _syncTokenController.text = syncSettings.authToken;
         _snapshot = snapshot;
+        _noteHistory = noteHistory;
         _selectedNoteId = snapshot.notes.firstOrNull?.id;
         _noteController.text = snapshot.notes.firstOrNull?.body ?? '';
       });
@@ -164,6 +167,7 @@ final class _CurioAppState extends State<CurioApp> {
       _syncServerController.text = syncSettings.serverUrl;
       _syncTokenController.text = syncSettings.authToken;
       _snapshot = snapshot;
+      _noteHistory = noteHistory;
       _selectedNoteId = snapshot.notes.firstOrNull?.id;
       _noteController.text = snapshot.notes.firstOrNull?.body ?? '';
     }
@@ -240,170 +244,143 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  Future<void> _addTaskForDate(DateTime date) async {
-    final localDate = dateOnly(date);
-    final draft = await _showTaskEditor(
-      initialDueLocal: _defaultDueLocalForDate(localDate),
-      dialogTitle: 'Novo item em ${formatLocalDate(localDate)}',
+  Future<void> _addNotificationForSelectedNote() async {
+    final note = _selectedNote(_snapshot);
+    if (note == null) {
+      return;
+    }
+
+    final localDate = dailyNoteDate(note) ?? _notesDate;
+    final draft = await _showNotificationEditor(
+      note: note,
+      initialLocal: _defaultNotificationLocalForDate(localDate),
     );
     if (draft == null || draft.title.trim().isEmpty) {
       return;
     }
 
-    await _createTaskFromDraft(draft, logMessage: 'item do dia criado');
+    await _upsertNoteNotification(note: note, draft: draft);
   }
 
-  Future<void> _createTaskFromDraft(
-    _TaskDraft draft, {
-    String logMessage = 'tarefa criada',
+  Future<void> _editNotification(ScheduledNotificationRecord record) async {
+    final snapshot = _snapshot;
+    final note = snapshot?.notes
+        .where((candidate) => candidate.id == record.ownerId)
+        .firstOrNull;
+    final draft = await _showNotificationEditor(
+      note: note,
+      record: record,
+      initialLocal: record.scheduledForUtc.toLocal(),
+    );
+    if (draft == null || draft.title.trim().isEmpty) {
+      return;
+    }
+
+    await _upsertNoteNotification(note: note, draft: draft, existing: record);
+  }
+
+  Future<void> _cancelNotification(ScheduledNotificationRecord record) async {
+    await _runAction(() async {
+      final snapshot = _snapshot;
+      if (snapshot == null) {
+        return;
+      }
+      final next = await _withoutNotificationRecord(snapshot, record);
+      await _saveSnapshot(next);
+      _log('notificação removida');
+      await _refreshPendingCount();
+    });
+  }
+
+  Future<void> _upsertNoteNotification({
+    required NoteItem? note,
+    required _NotificationDraft draft,
+    ScheduledNotificationRecord? existing,
   }) async {
     await _runAction(() async {
-      final now = DateTime.now().toUtc();
-      final task = TaskItem(
-        id: _newId('task'),
-        title: draft.title.trim(),
-        description: draft.description.trim(),
-        status: TaskStatus.open,
-        dueAtUtc: draft.dueAtUtc,
-        reminderEnabled: draft.reminderEnabled,
-        createdAtUtc: now,
-        updatedAtUtc: now,
+      var snapshot = _snapshot;
+      if (snapshot == null) {
+        return;
+      }
+
+      final scheduledAtUtc = draft.scheduledAtUtc.toUtc();
+      if (!scheduledAtUtc.isAfter(DateTime.now().toUtc())) {
+        _log('notificação ignorada: horário no passado');
+        return;
+      }
+
+      if (existing != null) {
+        snapshot = await _withoutNotificationRecord(snapshot, existing);
+      }
+
+      final ownerId = note?.id ?? existing?.ownerId ?? _newId('note-alert');
+      final intent = ReminderIntent.oneShot(
+        id:
+            existing?.reminderIntentId ??
+            'note-$ownerId-${DateTime.now().toUtc().microsecondsSinceEpoch}',
+        ownerId: ownerId,
+        ownerType: ReminderOwnerType.note,
+        instantUtc: scheduledAtUtc,
+        updatedAtUtc: DateTime.now().toUtc(),
+        timeZone: widget.notifications.localTimeZoneId,
       );
 
-      await _upsertTask(task);
-      _log(logMessage);
-    });
-  }
-
-  Future<void> _editTask(TaskItem task) async {
-    final draft = await _showTaskEditor(task: task);
-    if (draft == null || draft.title.trim().isEmpty) {
-      return;
-    }
-
-    final updated = task.copyWith(
-      title: draft.title.trim(),
-      description: draft.description.trim(),
-      dueAtUtc: draft.dueAtUtc,
-      reminderEnabled: draft.reminderEnabled,
-      updatedAtUtc: DateTime.now().toUtc(),
-      clearDueAt: draft.dueAtUtc == null,
-    );
-
-    await _runAction(() async {
-      await _upsertTask(updated, existing: task);
-      _log('tarefa atualizada');
-    });
-  }
-
-  Future<void> _upsertTask(TaskItem task, {TaskItem? existing}) async {
-    final snapshot = _snapshot;
-    if (snapshot == null) {
-      return;
-    }
-
-    var next = snapshot.copyWith(
-      tasks: existing == null
-          ? <TaskItem>[task, ...snapshot.tasks]
-          : snapshot.tasks
-                .map((candidate) => candidate.id == task.id ? task : candidate)
-                .toList(),
-    );
-    next = await _cancelTaskNotifications(next, task.id);
-    next = await _scheduleTaskNotification(next, task);
-    await _saveSnapshot(next);
-    await _refreshPendingCount();
-  }
-
-  Future<AppSnapshot> _cancelTaskNotifications(
-    AppSnapshot snapshot,
-    String taskId,
-  ) async {
-    final records = snapshot.scheduledNotifications
-        .where((record) => _isTaskRecord(record, taskId))
-        .toList();
-
-    for (final record in records) {
+      final ScheduleResult? result;
       try {
-        await widget.notifications.cancel(record.id);
-      } on Object catch (error) {
-        _log(
-          'notificação antiga não cancelada: ${_errorDescriber.describe(error)}',
+        result = await widget.notifications.scheduleReminder(
+          intent: intent,
+          deviceId: _deviceId,
+          title: draft.title.trim(),
+          body: draft.body.trim(),
         );
+      } on Object catch (error) {
+        _log('notificação não agendada: ${_errorDescriber.describe(error)}');
+        return;
       }
-    }
+      if (result == null) {
+        return;
+      }
 
-    if (records.isEmpty) {
-      return snapshot;
+      final scheduled = result;
+      setState(() {
+        _lastSchedule = scheduled;
+        _permissionState = scheduled.permissionState;
+      });
+      await _saveSnapshot(
+        snapshot.copyWith(
+          scheduledNotifications: <ScheduledNotificationRecord>[
+            scheduled.record,
+            ...snapshot.scheduledNotifications.where(
+              (record) =>
+                  record.id != scheduled.record.id && record.id != existing?.id,
+            ),
+          ],
+        ),
+      );
+      _log(
+        '${existing == null ? 'notificação criada' : 'notificação atualizada'}: '
+        '${formatLocal(scheduled.plan.scheduledLocal)}',
+      );
+      await _refreshPendingCount();
+    });
+  }
+
+  Future<AppSnapshot> _withoutNotificationRecord(
+    AppSnapshot snapshot,
+    ScheduledNotificationRecord record,
+  ) async {
+    try {
+      await widget.notifications.cancel(record.id);
+    } on Object catch (error) {
+      _log(
+        'notificação antiga não cancelada: ${_errorDescriber.describe(error)}',
+      );
     }
 
     return snapshot.copyWith(
       scheduledNotifications: snapshot.scheduledNotifications
-          .where((record) => !_isTaskRecord(record, taskId))
+          .where((candidate) => candidate.id != record.id)
           .toList(),
-    );
-  }
-
-  Future<AppSnapshot> _scheduleTaskNotification(
-    AppSnapshot snapshot,
-    TaskItem task,
-  ) async {
-    final dueAtUtc = task.dueAtUtc;
-    if (!task.reminderEnabled || task.isDone || dueAtUtc == null) {
-      return snapshot;
-    }
-
-    if (!dueAtUtc.isAfter(DateTime.now().toUtc())) {
-      _log('notificação ignorada: horário no passado');
-      return snapshot;
-    }
-
-    final intent = ReminderIntent.oneShot(
-      id: 'task-${task.id}-due',
-      ownerId: task.id,
-      ownerType: ReminderOwnerType.task,
-      instantUtc: dueAtUtc,
-      updatedAtUtc: DateTime.now().toUtc(),
-      timeZone: widget.notifications.localTimeZoneId,
-    );
-
-    final ScheduleResult? result;
-    try {
-      result = await widget.notifications.scheduleReminder(
-        intent: intent,
-        deviceId: _deviceId,
-        title: task.title,
-        body: task.description.isEmpty
-            ? 'Tarefa com horário'
-            : task.description,
-      );
-    } on Object catch (error) {
-      _log('notificação não agendada: ${_errorDescriber.describe(error)}');
-      return snapshot;
-    }
-    if (result == null) {
-      return snapshot;
-    }
-    final scheduled = result;
-
-    setState(() {
-      _lastSchedule = scheduled;
-      _permissionState = scheduled.permissionState;
-    });
-    _log(
-      'alerta da tarefa: ${formatLocal(scheduled.plan.scheduledLocal)} '
-      '(${scheduled.deliveryLabel})',
-    );
-
-    return snapshot.copyWith(
-      scheduledNotifications: <ScheduledNotificationRecord>[
-        scheduled.record,
-        ...snapshot.scheduledNotifications.where(
-          (record) =>
-              record.id != scheduled.record.id &&
-              !_isTaskRecord(record, task.id),
-        ),
-      ],
     );
   }
 
@@ -504,6 +481,7 @@ final class _CurioAppState extends State<CurioApp> {
     }
 
     final now = DateTime.now().toUtc();
+    await _recordNoteRevision(selected, now);
     final nextNotes = snapshot.notes
         .where((note) => note.id != selected.id)
         .toList();
@@ -532,30 +510,6 @@ final class _CurioAppState extends State<CurioApp> {
       _noteController.text = nextSelected?.body ?? '';
     });
     _log('nota excluída');
-  }
-
-  Future<void> _createTaskFromSelectedNote() async {
-    final selected = _selectedNote(_snapshot);
-    if (selected == null) {
-      return;
-    }
-
-    final now = DateTime.now().toUtc();
-    final task = TaskItem(
-      id: _newId('task'),
-      title: selected.title,
-      description: noteTaskDescription(selected),
-      status: TaskStatus.open,
-      sourceNoteId: selected.id,
-      createdAtUtc: now,
-      updatedAtUtc: now,
-    );
-
-    await _runAction(() async {
-      await _upsertTask(task);
-      setState(() => _selectedIndex = 0);
-      _log('tarefa criada da nota');
-    });
   }
 
   Future<void> _openDailyNote(DateTime date) async {
@@ -604,28 +558,11 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  Future<void> _openTaskDayOrEdit(TaskItem task) async {
-    final dueAtUtc = task.dueAtUtc;
-    if (dueAtUtc == null) {
-      await _editTask(task);
-      return;
-    }
-
-    await _openDailyNote(dueAtUtc);
-  }
-
   Future<void> _openNotificationTarget(
     ScheduledNotificationRecord record,
   ) async {
     switch (record.ownerType) {
       case ReminderOwnerType.task:
-        final task = _snapshot?.tasks
-            .where((candidate) => candidate.id == record.ownerId)
-            .firstOrNull;
-        if (task != null) {
-          await _editTask(task);
-          return;
-        }
         await _openDailyNote(record.scheduledForUtc);
       case ReminderOwnerType.note:
         final note = _snapshot?.notes
@@ -646,78 +583,7 @@ final class _CurioAppState extends State<CurioApp> {
   }
 
   Future<void> _openDayEditor(DateTime date) async {
-    final selectedDate = dateOnly(date);
-    setState(() => _agendaDate = selectedDate);
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        final snapshot = _snapshot;
-        final dayTasks = snapshot == null
-            ? const <TaskItem>[]
-            : tasksDueOnDate(snapshot.tasks, selectedDate);
-
-        return AlertDialog(
-          title: Text(formatLocalDate(selectedDate)),
-          content: SizedBox(
-            width: 520,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 420),
-              child: dayTasks.isEmpty
-                  ? Text(
-                      'Nenhum item neste dia.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    )
-                  : ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: dayTasks.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final task = dayTasks[index];
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(
-                            task.isDone
-                                ? Icons.check_circle_outline
-                                : Icons.radio_button_unchecked,
-                          ),
-                          title: Text(task.title),
-                          subtitle: Text(taskMeta(task)),
-                          trailing: const Icon(Icons.edit_outlined),
-                          onTap: () {
-                            Navigator.of(dialogContext).pop();
-                            unawaited(_editTask(task));
-                          },
-                        );
-                      },
-                    ),
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Fechar'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(_openDailyNote(selectedDate));
-              },
-              icon: const Icon(Icons.article_outlined),
-              label: const Text('Editar nota'),
-            ),
-            FilledButton.icon(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(_addTaskForDate(selectedDate));
-              },
-              icon: const Icon(Icons.notification_add_outlined),
-              label: const Text('Adicionar alerta'),
-            ),
-          ],
-        );
-      },
-    );
+    await _openDailyNote(date);
   }
 
   Future<void> _openGlobalSearch() async {
@@ -735,26 +601,6 @@ final class _CurioAppState extends State<CurioApp> {
     }
 
     switch (result.kind) {
-      case GlobalSearchResultKind.task:
-        final task =
-            _snapshot?.tasks
-                .where((candidate) => candidate.id == result.id)
-                .firstOrNull ??
-            result.task;
-        if (task == null) {
-          return;
-        }
-        setState(() {
-          _selectedIndex = 1;
-          _taskFilter = TaskFilter.all;
-          _taskQuery = '';
-          _taskSearchController.clear();
-          final dueAtUtc = task.dueAtUtc;
-          if (dueAtUtc != null) {
-            _agendaDate = dateOnly(dueAtUtc);
-          }
-        });
-        await _editTask(task);
       case GlobalSearchResultKind.note:
         final note =
             _snapshot?.notes
@@ -770,6 +616,17 @@ final class _CurioAppState extends State<CurioApp> {
           _noteController.text = note.body;
           _notesDate = dailyNoteDate(note) ?? _notesDate;
         });
+      case GlobalSearchResultKind.notification:
+        final notification =
+            _snapshot?.scheduledNotifications
+                .where((candidate) => candidate.id.toString() == result.id)
+                .firstOrNull ??
+            result.notification;
+        if (notification == null) {
+          return;
+        }
+        await _openNotificationTarget(notification);
+        await _editNotification(notification);
     }
   }
 
@@ -799,6 +656,13 @@ final class _CurioAppState extends State<CurioApp> {
     }
 
     final now = DateTime.now().toUtc();
+    final selected = snapshot.notes
+        .where((note) => note.id == selectedNoteId)
+        .firstOrNull;
+    if (selected == null || selected.body == body) {
+      return;
+    }
+    unawaited(_recordNoteRevision(selected, now));
     final next = snapshot.copyWith(
       notes: snapshot.notes.map((note) {
         if (note.id != selectedNoteId) {
@@ -812,6 +676,85 @@ final class _CurioAppState extends State<CurioApp> {
         _log('nota não salva: ${_errorDescriber.describe(error)}');
       }),
     );
+  }
+
+  Future<void> _recordNoteRevision(NoteItem note, DateTime savedAtUtc) async {
+    final lastHistoryAt = _lastHistoryAtByNote[note.id];
+    if (lastHistoryAt != null &&
+        savedAtUtc.difference(lastHistoryAt) < const Duration(seconds: 3)) {
+      return;
+    }
+    if (_noteHistory.isNotEmpty &&
+        _noteHistory.first.noteId == note.id &&
+        _noteHistory.first.body == note.body) {
+      return;
+    }
+
+    _lastHistoryAtByNote[note.id] = savedAtUtc;
+    final revision = NoteEditRevision(
+      id: _newId('revision'),
+      noteId: note.id,
+      noteTitle: note.title,
+      body: note.body,
+      savedAtUtc: savedAtUtc,
+    );
+
+    try {
+      final next = await widget.noteHistory.add(revision);
+      if (mounted) {
+        setState(() => _noteHistory = next);
+      } else {
+        _noteHistory = next;
+      }
+      _log('histórico salvo: ${note.title}');
+    } on Object catch (error) {
+      _log('histórico não salvo: ${_errorDescriber.describe(error)}');
+    }
+  }
+
+  Future<void> _restoreNoteRevision(NoteEditRevision revision) async {
+    await _runAction(() async {
+      final snapshot = _snapshot;
+      if (snapshot == null) {
+        return;
+      }
+
+      final now = DateTime.now().toUtc();
+      final existing = snapshot.notes
+          .where((note) => note.id == revision.noteId)
+          .firstOrNull;
+      if (existing != null) {
+        await _recordNoteRevision(existing, now);
+      }
+
+      final restored = existing == null
+          ? NoteItem(
+              id: revision.noteId,
+              title: revision.noteTitle,
+              body: revision.body,
+              createdAtUtc: revision.savedAtUtc,
+              updatedAtUtc: now,
+            )
+          : existing.copyWith(
+              title: revision.noteTitle,
+              body: revision.body,
+              updatedAtUtc: now,
+            );
+      final nextNotes = existing == null
+          ? <NoteItem>[restored, ...snapshot.notes]
+          : snapshot.notes
+                .map((note) => note.id == restored.id ? restored : note)
+                .toList();
+      final next = snapshot.copyWith(notes: nextNotes);
+      await _saveSnapshot(next);
+      setState(() {
+        _selectedIndex = 3;
+        _selectedNoteId = restored.id;
+        _notesDate = dailyNoteDate(restored) ?? _notesDate;
+        _noteController.text = restored.body;
+      });
+      _log('versão restaurada: ${revision.noteTitle}');
+    });
   }
 
   Future<void> _saveSyncSettings() async {
@@ -1022,30 +965,40 @@ final class _CurioAppState extends State<CurioApp> {
     }
   }
 
-  Future<_TaskDraft?> _showTaskEditor({
-    TaskItem? task,
-    DateTime? initialDueLocal,
-    String? dialogTitle,
+  Future<_NotificationDraft?> _showNotificationEditor({
+    NoteItem? note,
+    ScheduledNotificationRecord? record,
+    DateTime? initialLocal,
   }) async {
-    final titleController = TextEditingController(text: task?.title ?? '');
-    final descriptionController = TextEditingController(
-      text: task?.description ?? '',
+    final titleController = TextEditingController(
+      text: record?.title.isNotEmpty == true
+          ? record!.title
+          : note == null
+          ? ''
+          : _notificationTitleFromNote(note),
     );
-    var dueLocal = task?.dueAtUtc?.toLocal() ?? initialDueLocal;
-    var reminderEnabled = task?.reminderEnabled ?? false;
+    final bodyController = TextEditingController(
+      text: record?.body.isNotEmpty == true
+          ? record!.body
+          : note == null
+          ? ''
+          : _notificationBodyFromNote(note),
+    );
+    var scheduledLocal =
+        record?.scheduledForUtc.toLocal() ??
+        initialLocal ??
+        DateTime.now().add(const Duration(minutes: 15));
 
     try {
-      return showDialog<_TaskDraft>(
+      return showDialog<_NotificationDraft>(
         context: context,
         builder: (context) {
           return StatefulBuilder(
             builder: (context, setDialogState) {
               Future<void> pickDate() async {
-                final fallback = DateTime.now().add(const Duration(hours: 1));
-                final current = dueLocal ?? fallback;
                 final picked = await showDatePicker(
                   context: context,
-                  initialDate: current,
+                  initialDate: scheduledLocal,
                   firstDate: DateTime(2024),
                   lastDate: DateTime(2100),
                 );
@@ -1053,31 +1006,29 @@ final class _CurioAppState extends State<CurioApp> {
                   return;
                 }
                 setDialogState(() {
-                  dueLocal = DateTime(
+                  scheduledLocal = DateTime(
                     picked.year,
                     picked.month,
                     picked.day,
-                    current.hour,
-                    current.minute,
+                    scheduledLocal.hour,
+                    scheduledLocal.minute,
                   );
                 });
               }
 
               Future<void> pickTime() async {
-                final fallback = DateTime.now().add(const Duration(hours: 1));
-                final current = dueLocal ?? fallback;
                 final picked = await showTimePicker(
                   context: context,
-                  initialTime: TimeOfDay.fromDateTime(current),
+                  initialTime: TimeOfDay.fromDateTime(scheduledLocal),
                 );
                 if (picked == null) {
                   return;
                 }
                 setDialogState(() {
-                  dueLocal = DateTime(
-                    current.year,
-                    current.month,
-                    current.day,
+                  scheduledLocal = DateTime(
+                    scheduledLocal.year,
+                    scheduledLocal.month,
+                    scheduledLocal.day,
                     picked.hour,
                     picked.minute,
                   );
@@ -1086,11 +1037,10 @@ final class _CurioAppState extends State<CurioApp> {
 
               return AlertDialog(
                 title: Text(
-                  dialogTitle ??
-                      (task == null ? 'Nova tarefa' : 'Editar tarefa'),
+                  record == null ? 'Nova notificação' : 'Editar notificação',
                 ),
                 content: SizedBox(
-                  width: 420,
+                  width: 460,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
@@ -1098,18 +1048,18 @@ final class _CurioAppState extends State<CurioApp> {
                         controller: titleController,
                         autofocus: true,
                         decoration: const InputDecoration(
-                          labelText: 'Título',
-                          hintText: 'Nome da tarefa',
+                          labelText: 'Nome da notificação',
+                          hintText: 'Texto que aparece no alerta',
                         ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
-                        controller: descriptionController,
+                        controller: bodyController,
                         minLines: 2,
                         maxLines: 4,
                         decoration: const InputDecoration(
-                          labelText: 'Nota / descrição',
-                          hintText: 'Texto livre opcional',
+                          labelText: 'Mensagem',
+                          hintText: 'Detalhe opcional',
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -1119,11 +1069,7 @@ final class _CurioAppState extends State<CurioApp> {
                             child: OutlinedButton.icon(
                               onPressed: pickDate,
                               icon: const Icon(Icons.event_outlined),
-                              label: Text(
-                                dueLocal == null
-                                    ? 'Definir data'
-                                    : formatLocalDate(dueLocal!),
-                              ),
+                              label: Text(formatLocalDate(scheduledLocal)),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -1131,43 +1077,10 @@ final class _CurioAppState extends State<CurioApp> {
                             child: OutlinedButton.icon(
                               onPressed: pickTime,
                               icon: const Icon(Icons.schedule_outlined),
-                              label: Text(
-                                dueLocal == null
-                                    ? 'Definir hora'
-                                    : formatLocalTime(dueLocal!),
-                              ),
+                              label: Text(formatLocalTime(scheduledLocal)),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            onPressed: dueLocal == null
-                                ? null
-                                : () {
-                                    setDialogState(() {
-                                      dueLocal = null;
-                                      reminderEnabled = false;
-                                    });
-                                  },
-                            icon: const Icon(Icons.event_busy_outlined),
-                            tooltip: 'Remover data',
-                          ),
                         ],
-                      ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Notificar no horário'),
-                        value: reminderEnabled,
-                        onChanged: (value) {
-                          setDialogState(() {
-                            if (value && dueLocal == null) {
-                              dueLocal = DateTime.now().add(
-                                const Duration(minutes: 15),
-                              );
-                            }
-                            reminderEnabled = value;
-                          });
-                        },
                       ),
                     ],
                   ),
@@ -1180,11 +1093,10 @@ final class _CurioAppState extends State<CurioApp> {
                   FilledButton(
                     onPressed: () {
                       Navigator.of(context).pop(
-                        _TaskDraft(
+                        _NotificationDraft(
                           title: titleController.text,
-                          description: descriptionController.text,
-                          dueAtUtc: dueLocal?.toUtc(),
-                          reminderEnabled: reminderEnabled && dueLocal != null,
+                          body: bodyController.text,
+                          scheduledAtUtc: scheduledLocal.toUtc(),
                         ),
                       );
                     },
@@ -1198,7 +1110,7 @@ final class _CurioAppState extends State<CurioApp> {
       );
     } finally {
       titleController.dispose();
-      descriptionController.dispose();
+      bodyController.dispose();
     }
   }
 
@@ -1223,12 +1135,15 @@ final class _CurioAppState extends State<CurioApp> {
   void _log(String message) {
     if (!mounted) {
       _activity.insert(0, message);
+      if (_activity.length > 50) {
+        _activity.removeLast();
+      }
       return;
     }
 
     setState(() {
       _activity.insert(0, message);
-      if (_activity.length > 8) {
+      if (_activity.length > 50) {
         _activity.removeLast();
       }
     });
@@ -1309,41 +1224,35 @@ final class _CurioAppState extends State<CurioApp> {
                 onZoomChanged: _setUiZoom,
                 pages: <Widget>[
                   _TodayView(
-                    tasks: _snapshot!.tasks,
+                    notes: _snapshot!.notes,
                     scheduledNotifications: _snapshot!.scheduledNotifications,
+                    activity: _activity,
                     busy: _busy,
                     permissionState: _permissionState,
                     lastSchedule: _lastSchedule,
                     lastNotificationLabel: _lastNotificationLabel,
                     pendingCount: _pendingCount,
-                    onEditTask: _editTask,
                     onRequestPermissions: _requestPermissions,
                     onCancelLast: _cancelLast,
                     onOpenNotification: (record) =>
-                        unawaited(_openNotificationTarget(record)),
+                        unawaited(_editNotification(record)),
                   ),
                   _AgendaView(
-                    tasks: _snapshot!.tasks,
-                    searchController: _taskSearchController,
-                    query: _taskQuery,
-                    filter: _taskFilter,
+                    notes: _snapshot!.notes,
+                    scheduledNotifications: _snapshot!.scheduledNotifications,
                     selectedDate: _agendaDate,
-                    onEditTask: _editTask,
-                    onQueryChanged: (value) =>
-                        setState(() => _taskQuery = value),
-                    onFilterChanged: (value) =>
-                        setState(() => _taskFilter = value),
                     onVisibleDateChanged: (value) =>
                         setState(() => _agendaDate = dateOnly(value)),
-                    onDateSelected: (value) =>
-                        setState(() => _agendaDate = dateOnly(value)),
+                    onDateSelected: (value) {
+                      setState(() => _agendaDate = dateOnly(value));
+                      unawaited(_openDailyNote(value));
+                    },
                     onEditDate: _openDayEditor,
                     onOpenDailyNote: _openDailyNote,
-                    onOpenTaskDay: (task) =>
-                        unawaited(_openTaskDayOrEdit(task)),
+                    onEditNotification: (record) =>
+                        unawaited(_editNotification(record)),
                   ),
                   _BoardView(
-                    tasks: _snapshot!.tasks,
                     notes: _snapshot!.notes,
                     scheduledNotifications: _snapshot!.scheduledNotifications,
                     visibleMonth: _agendaDate,
@@ -1362,19 +1271,26 @@ final class _CurioAppState extends State<CurioApp> {
                     ),
                   ),
                   _NotesView(
-                    tasks: _snapshot!.tasks,
                     notes: _snapshot!.notes,
+                    scheduledNotifications: _snapshot!.scheduledNotifications,
+                    noteHistory: _noteHistory,
                     selectedNoteId: _selectedNoteId,
                     selectedDate: _notesDate,
                     controller: _noteController,
-                    dayCounts: _dayCounts(_snapshot!),
-                    onSelectDate: _openDailyNote,
-                    onOpenDayEditor: _openDayEditor,
-                    onAddTaskForDate: _addTaskForDate,
+                    onOpenCalendar: () => setState(() {
+                      _agendaDate = _notesDate;
+                      _selectedIndex = 1;
+                    }),
+                    onAddNotification: _addNotificationForSelectedNote,
+                    onEditNotification: (record) =>
+                        unawaited(_editNotification(record)),
+                    onCancelNotification: (record) =>
+                        unawaited(_cancelNotification(record)),
                     onAddNote: _addNote,
                     onRenameNote: _renameSelectedNote,
                     onDeleteNote: _deleteSelectedNote,
-                    onCreateTaskFromNote: _createTaskFromSelectedNote,
+                    onRestoreRevision: (revision) =>
+                        unawaited(_restoreNoteRevision(revision)),
                     onBodyChanged: _updateSelectedNoteBody,
                   ),
                   _SyncView(
@@ -1408,7 +1324,7 @@ String _newId(String prefix) {
   return '$prefix-${DateTime.now().toUtc().microsecondsSinceEpoch}';
 }
 
-DateTime _defaultDueLocalForDate(DateTime date) {
+DateTime _defaultNotificationLocalForDate(DateTime date) {
   final localDate = dateOnly(date);
   final now = DateTime.now();
   final nextHour = now.add(const Duration(hours: 1));
@@ -1424,22 +1340,64 @@ DateTime _defaultDueLocalForDate(DateTime date) {
   return DateTime(localDate.year, localDate.month, localDate.day, 9);
 }
 
-final class _TaskDraft {
-  const _TaskDraft({
+final class _NotificationDraft {
+  const _NotificationDraft({
     required this.title,
-    required this.description,
-    required this.dueAtUtc,
-    required this.reminderEnabled,
+    required this.body,
+    required this.scheduledAtUtc,
   });
 
   final String title;
-  final String description;
-  final DateTime? dueAtUtc;
-  final bool reminderEnabled;
+  final String body;
+  final DateTime scheduledAtUtc;
 }
 
-bool _isTaskRecord(ScheduledNotificationRecord record, String taskId) {
-  return record.ownerType == ReminderOwnerType.task && record.ownerId == taskId;
+String _notificationTitleFromNote(NoteItem note) {
+  final heading = RegExp(
+    r'^\s{0,3}#{1,6}\s+(.+)$',
+    multiLine: true,
+  ).firstMatch(note.body);
+  final title = heading?.group(1)?.trim();
+  if (title != null && title.isNotEmpty) {
+    return _cleanNotificationText(title);
+  }
+
+  final line = RegExp(r'^\s*(?:[-*]\s*)?(.+?)\s*$', multiLine: true)
+      .allMatches(note.body)
+      .map((match) => match.group(1)?.trim() ?? '')
+      .where((value) => value.isNotEmpty)
+      .firstOrNull;
+  if (line != null && line.isNotEmpty) {
+    return _cleanNotificationText(line);
+  }
+
+  return note.title;
+}
+
+String _notificationBodyFromNote(NoteItem note) {
+  final compact = note.body
+      .replaceAll(RegExp(r'^\s{0,3}#{1,6}\s+', multiLine: true), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (compact.isEmpty) {
+    return 'Notificação de ${note.title}';
+  }
+  return compact.length <= 140 ? compact : '${compact.substring(0, 140)}...';
+}
+
+String _cleanNotificationText(String value) {
+  return value
+      .replaceAll(RegExp(r'[*_`>#\[\]]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+String _revisionPreview(String body) {
+  final compact = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (compact.isEmpty) {
+    return 'vazio';
+  }
+  return compact.length <= 96 ? compact : '${compact.substring(0, 96)}...';
 }
 
 AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
@@ -1451,23 +1409,6 @@ AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
       ),
     ],
   );
-}
-
-Map<DateTime, int> _dayCounts(AppSnapshot snapshot) {
-  final counts = <DateTime, int>{...noteCountsByDate(snapshot.notes)};
-  for (final task in snapshot.tasks) {
-    final dueAtUtc = task.dueAtUtc;
-    if (dueAtUtc == null) {
-      continue;
-    }
-    final date = dateOnly(dueAtUtc);
-    counts[date] = (counts[date] ?? 0) + 1;
-  }
-  for (final record in snapshot.scheduledNotifications) {
-    final date = dateOnly(record.scheduledForUtc);
-    counts[date] = (counts[date] ?? 0) + 1;
-  }
-  return counts;
 }
 
 final class _BootScreen extends StatelessWidget {
@@ -1494,31 +1435,11 @@ final class _ZoomRailControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        IconButton(
-          onPressed: zoom >= 2 ? null : () => onZoomChanged(zoom + 0.1),
-          icon: const Icon(Icons.zoom_in_outlined),
-          tooltip: 'Aumentar zoom',
-        ),
-        Text(
-          pageZoomLabel(zoom),
-          style: Theme.of(
-            context,
-          ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        IconButton(
-          onPressed: zoom <= 0.2 ? null : () => onZoomChanged(zoom - 0.1),
-          icon: const Icon(Icons.zoom_out_outlined),
-          tooltip: 'Diminuir zoom',
-        ),
-        IconButton(
-          onPressed: zoom == 1 ? null : () => onZoomChanged(1),
-          icon: const Icon(Icons.restart_alt_outlined),
-          tooltip: 'Restaurar zoom',
-        ),
-      ],
+    final canReset = (clampPageZoom(zoom) - 1).abs() > 0.001;
+    return IconButton(
+      onPressed: canReset ? () => onZoomChanged(1) : null,
+      icon: const Icon(Icons.restart_alt_outlined),
+      tooltip: 'Restaurar zoom',
     );
   }
 }
@@ -1531,45 +1452,20 @@ final class _ZoomBottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final canReset = (clampPageZoom(zoom) - 1).abs() > 0.001;
     return Material(
       color: Theme.of(context).colorScheme.surface,
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-          child: Row(
-            children: <Widget>[
-              IconButton(
-                onPressed: zoom <= 0.2 ? null : () => onZoomChanged(zoom - 0.1),
-                icon: const Icon(Icons.zoom_out_outlined),
-                tooltip: 'Diminuir zoom',
-              ),
-              Expanded(
-                child: Slider(
-                  value: clampPageZoom(zoom),
-                  min: minPageZoom,
-                  max: maxPageZoom,
-                  divisions: 18,
-                  label: pageZoomLabel(zoom),
-                  onChanged: onZoomChanged,
-                ),
-              ),
-              SizedBox(
-                width: 48,
-                child: Text(
-                  pageZoomLabel(zoom),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: zoom >= 2 ? null : () => onZoomChanged(zoom + 0.1),
-                icon: const Icon(Icons.zoom_in_outlined),
-                tooltip: 'Aumentar zoom',
-              ),
-            ],
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: IconButton(
+              onPressed: canReset ? () => onZoomChanged(1) : null,
+              icon: const Icon(Icons.restart_alt_outlined),
+              tooltip: 'Restaurar zoom',
+            ),
           ),
         ),
       ),
@@ -1767,7 +1663,7 @@ final class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.manage_search_outlined),
                 labelText: 'Buscar',
-                hintText: 'Tarefas, notas, descrições',
+                hintText: 'Notas e notificações',
               ),
             ),
             const SizedBox(height: 12),
@@ -1775,7 +1671,7 @@ final class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
               alignment: Alignment.centerLeft,
               child: Text(
                 query.isEmpty
-                    ? 'Tarefas e notas'
+                    ? 'Notas e notificações'
                     : '${_results.length} resultado(s)',
                 style: theme.textTheme.bodySmall,
               ),
@@ -1818,13 +1714,16 @@ final class _SearchResultsBody extends StatelessWidget {
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final result = results[index];
-        final isTask = result.kind == GlobalSearchResultKind.task;
+        final isNotification =
+            result.kind == GlobalSearchResultKind.notification;
         final preview = result.preview;
 
         return ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(
-            isTask ? Icons.task_alt_outlined : Icons.sticky_note_2_outlined,
+            isNotification
+                ? Icons.notifications_none_outlined
+                : Icons.sticky_note_2_outlined,
           ),
           title: Text(
             result.title,
@@ -1884,27 +1783,27 @@ final class _LogoMark extends StatelessWidget {
 
 final class _TodayView extends StatelessWidget {
   const _TodayView({
-    required this.tasks,
+    required this.notes,
     required this.scheduledNotifications,
+    required this.activity,
     required this.busy,
     required this.permissionState,
     required this.lastSchedule,
     required this.lastNotificationLabel,
     required this.pendingCount,
-    required this.onEditTask,
     required this.onRequestPermissions,
     required this.onCancelLast,
     required this.onOpenNotification,
   });
 
-  final List<TaskItem> tasks;
+  final List<NoteItem> notes;
   final List<ScheduledNotificationRecord> scheduledNotifications;
+  final List<String> activity;
   final bool busy;
   final NotificationPermissionState permissionState;
   final ScheduleResult? lastSchedule;
   final String? lastNotificationLabel;
   final int pendingCount;
-  final ValueChanged<TaskItem> onEditTask;
   final VoidCallback onRequestPermissions;
   final VoidCallback onCancelLast;
   final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
@@ -1923,12 +1822,14 @@ final class _TodayView extends StatelessWidget {
           final wide = constraints.maxWidth >= 980;
           final children = <Widget>[
             _FocusPanel(
-              tasks: tasks,
+              notes: notes,
+              scheduledNotifications: scheduledNotifications,
+              activity: activity,
               lastNotificationLabel: lastNotificationLabel,
-              onEditTask: onEditTask,
+              onOpenNotification: onOpenNotification,
             ),
             _NotificationPanel(
-              tasks: tasks,
+              notes: notes,
               scheduledNotifications: scheduledNotifications,
               busy: busy,
               permissionState: permissionState,
@@ -1966,28 +1867,30 @@ final class _TodayView extends StatelessWidget {
 
 final class _FocusPanel extends StatelessWidget {
   const _FocusPanel({
-    required this.tasks,
+    required this.notes,
+    required this.scheduledNotifications,
+    required this.activity,
     required this.lastNotificationLabel,
-    required this.onEditTask,
+    required this.onOpenNotification,
   });
 
-  final List<TaskItem> tasks;
+  final List<NoteItem> notes;
+  final List<ScheduledNotificationRecord> scheduledNotifications;
+  final List<String> activity;
   final String? lastNotificationLabel;
-  final ValueChanged<TaskItem> onEditTask;
+  final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now().toUtc();
-    final visibleTasks =
-        tasks
-            .where(
-              (task) =>
-                  !task.isDone &&
-                  task.dueAtUtc != null &&
-                  !task.dueAtUtc!.isBefore(now),
-            )
+    final visibleNotifications =
+        scheduledNotifications
+            .where((record) => record.scheduledForUtc.isAfter(now))
             .toList()
-          ..sort(compareTasksByAgenda);
+          ..sort(
+            (left, right) =>
+                left.scheduledForUtc.compareTo(right.scheduledForUtc),
+          );
 
     return _Surface(
       child: Column(
@@ -1995,17 +1898,21 @@ final class _FocusPanel extends StatelessWidget {
         children: <Widget>[
           const _SectionHeader(
             icon: Icons.bolt_outlined,
-            title: 'Próximas tarefas',
+            title: 'Próximas notificações',
           ),
           const SizedBox(height: 18),
-          if (visibleTasks.isEmpty)
+          if (visibleNotifications.isEmpty)
             Text(
-              'Nenhuma tarefa futura com horário.',
+              'Nenhuma notificação futura gravada.',
               style: Theme.of(context).textTheme.bodySmall,
             )
           else
-            for (final task in visibleTasks.take(8))
-              _UpcomingTaskTile(task: task, onTap: () => onEditTask(task)),
+            for (final record in visibleNotifications.take(8))
+              _NotificationRecordTile(
+                record: record,
+                title: _notificationRecordTitle(record, notes),
+                onTap: () => onOpenNotification(record),
+              ),
           if (lastNotificationLabel != null) ...<Widget>[
             const Divider(height: 28),
             Text(
@@ -2020,6 +1927,16 @@ final class _FocusPanel extends StatelessWidget {
               style: const TextStyle(fontSize: 13),
             ),
           ],
+          if (activity.isNotEmpty) ...<Widget>[
+            const Divider(height: 28),
+            const _SectionHeader(icon: Icons.history_outlined, title: 'Log'),
+            const SizedBox(height: 8),
+            for (final item in activity.take(6))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(item, style: Theme.of(context).textTheme.bodySmall),
+              ),
+          ],
         ],
       ),
     );
@@ -2028,7 +1945,7 @@ final class _FocusPanel extends StatelessWidget {
 
 final class _NotificationPanel extends StatelessWidget {
   const _NotificationPanel({
-    required this.tasks,
+    required this.notes,
     required this.scheduledNotifications,
     required this.busy,
     required this.permissionState,
@@ -2039,7 +1956,7 @@ final class _NotificationPanel extends StatelessWidget {
     required this.onOpenNotification,
   });
 
-  final List<TaskItem> tasks;
+  final List<NoteItem> notes;
   final List<ScheduledNotificationRecord> scheduledNotifications;
   final bool busy;
   final NotificationPermissionState permissionState;
@@ -2107,7 +2024,7 @@ final class _NotificationPanel extends StatelessWidget {
             for (final record in active.take(10))
               _NotificationRecordTile(
                 record: record,
-                title: _notificationRecordTitle(record, tasks),
+                title: _notificationRecordTitle(record, notes),
                 onTap: () => onOpenNotification(record),
               ),
           ],
@@ -2119,46 +2036,51 @@ final class _NotificationPanel extends StatelessWidget {
 
 final class _AgendaView extends StatelessWidget {
   const _AgendaView({
-    required this.tasks,
-    required this.searchController,
-    required this.query,
-    required this.filter,
+    required this.notes,
+    required this.scheduledNotifications,
     required this.selectedDate,
-    required this.onEditTask,
-    required this.onQueryChanged,
-    required this.onFilterChanged,
     required this.onVisibleDateChanged,
     required this.onDateSelected,
     required this.onEditDate,
     required this.onOpenDailyNote,
-    required this.onOpenTaskDay,
+    required this.onEditNotification,
   });
 
-  final List<TaskItem> tasks;
-  final TextEditingController searchController;
-  final String query;
-  final TaskFilter filter;
+  final List<NoteItem> notes;
+  final List<ScheduledNotificationRecord> scheduledNotifications;
   final DateTime selectedDate;
-  final ValueChanged<TaskItem> onEditTask;
-  final ValueChanged<String> onQueryChanged;
-  final ValueChanged<TaskFilter> onFilterChanged;
   final ValueChanged<DateTime> onVisibleDateChanged;
   final ValueChanged<DateTime> onDateSelected;
   final ValueChanged<DateTime> onEditDate;
   final ValueChanged<DateTime> onOpenDailyNote;
-  final ValueChanged<TaskItem> onOpenTaskDay;
+  final ValueChanged<ScheduledNotificationRecord> onEditNotification;
 
   @override
   Widget build(BuildContext context) {
-    final visibleTasks = filterTasks(tasks, query, filter);
-    final timelineTasks = visibleTasks.toList()..sort(compareTasksByAgenda);
-    final selectedTasks = tasksDueOnDate(visibleTasks, selectedDate);
-    final countsByDate = taskCountsByDate(visibleTasks);
+    final countsByDate = <DateTime, int>{...noteCountsByDate(notes)};
+    for (final record in scheduledNotifications) {
+      final date = dateOnly(record.scheduledForUtc);
+      countsByDate[date] = (countsByDate[date] ?? 0) + 1;
+    }
+    final selectedNotes = notes
+        .where(
+          (note) =>
+              isSameDate(dailyNoteDate(note) ?? DateTime(1), selectedDate),
+        )
+        .toList();
+    final selectedNotifications =
+        scheduledNotifications
+            .where((record) => isSameDate(record.scheduledForUtc, selectedDate))
+            .toList()
+          ..sort(
+            (left, right) =>
+                left.scheduledForUtc.compareTo(right.scheduledForUtc),
+          );
 
     return _PageFrame(
       title: 'Agenda',
-      subtitle: '${visibleTasks.length} tarefa(s)',
-      trailing: OutlinedButton.icon(
+      subtitle: 'Calendário de notas e notificações',
+      trailing: FilledButton.icon(
         onPressed: () => onOpenDailyNote(selectedDate),
         icon: const Icon(Icons.edit_note_outlined),
         label: const Text('Editar em Notas'),
@@ -2166,48 +2088,9 @@ final class _AgendaView extends StatelessWidget {
       child: Column(
         children: <Widget>[
           _Surface(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                TextField(
-                  controller: searchController,
-                  onChanged: onQueryChanged,
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search_outlined),
-                    suffixIcon: query.isEmpty
-                        ? null
-                        : IconButton(
-                            onPressed: () {
-                              searchController.clear();
-                              onQueryChanged('');
-                            },
-                            icon: const Icon(Icons.close_outlined),
-                            tooltip: 'Limpar busca',
-                          ),
-                    hintText: 'Buscar por título, descrição ou nota vinculada',
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    for (final item in TaskFilter.values)
-                      FilterChip(
-                        label: Text(taskFilterLabel(item)),
-                        selected: filter == item,
-                        onSelected: (_) => onFilterChanged(item),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          _Surface(
             child: AgendaCalendar(
               selectedDate: selectedDate,
-              taskCounts: countsByDate,
+              dayCounts: countsByDate,
               onVisibleDateChanged: onVisibleDateChanged,
               onDateSelected: onDateSelected,
               onEditDate: onEditDate,
@@ -2228,53 +2111,40 @@ final class _AgendaView extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (selectedTasks.isEmpty)
+                if (selectedNotes.isEmpty && selectedNotifications.isEmpty)
                   Text(
-                    'Nenhuma tarefa neste dia.',
+                    'Nenhuma nota ou notificação neste dia.',
                     style: Theme.of(context).textTheme.bodySmall,
                   )
-                else
-                  for (var index = 0; index < selectedTasks.length; index++)
-                    _TimelineRow(
-                      time: timelineLabel(selectedTasks[index]),
-                      title: selectedTasks[index].title,
-                      subtitle: taskMeta(selectedTasks[index]),
-                      tone: taskTone(index),
-                      onTap: () => onOpenTaskDay(selectedTasks[index]),
-                      actionTooltip: 'Abrir em Notas',
+                else ...<Widget>[
+                  for (final note in selectedNotes)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.article_outlined),
+                      title: Text(note.title),
+                      subtitle: Text(formatLocalDateTime(note.updatedAtUtc)),
+                      onTap: () => onOpenDailyNote(selectedDate),
                     ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          _Surface(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const _SectionHeader(
-                  icon: Icons.timeline_outlined,
-                  title: 'Linha',
-                ),
-                const SizedBox(height: 12),
-                if (timelineTasks.isEmpty)
-                  Text(
-                    'Nada encontrado.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  for (
+                    var index = 0;
+                    index < selectedNotifications.length;
+                    index++
                   )
-                else
-                  for (var index = 0; index < timelineTasks.length; index++)
                     _TimelineRow(
-                      time: timelineLabel(timelineTasks[index]),
-                      title: timelineTasks[index].title,
-                      subtitle: taskMeta(timelineTasks[index]),
-                      tone: taskTone(index),
-                      onTap: () => timelineTasks[index].dueAtUtc == null
-                          ? onEditTask(timelineTasks[index])
-                          : onOpenTaskDay(timelineTasks[index]),
-                      actionTooltip: timelineTasks[index].dueAtUtc == null
-                          ? 'Editar tarefa'
-                          : 'Abrir em Notas',
+                      time: formatLocalTime(
+                        selectedNotifications[index].scheduledForUtc,
+                      ),
+                      title: _notificationRecordTitle(
+                        selectedNotifications[index],
+                        notes,
+                      ),
+                      subtitle: selectedNotifications[index].body,
+                      tone: entryTone(index),
+                      onTap: () =>
+                          onEditNotification(selectedNotifications[index]),
+                      actionTooltip: 'Editar notificação',
                     ),
+                ],
               ],
             ),
           ),
@@ -2286,7 +2156,6 @@ final class _AgendaView extends StatelessWidget {
 
 final class _BoardView extends StatelessWidget {
   const _BoardView({
-    required this.tasks,
     required this.notes,
     required this.scheduledNotifications,
     required this.visibleMonth,
@@ -2295,7 +2164,6 @@ final class _BoardView extends StatelessWidget {
     required this.onNextMonth,
   });
 
-  final List<TaskItem> tasks;
   final List<NoteItem> notes;
   final List<ScheduledNotificationRecord> scheduledNotifications;
   final DateTime visibleMonth;
@@ -2307,7 +2175,6 @@ final class _BoardView extends StatelessWidget {
   Widget build(BuildContext context) {
     final month = DateTime(visibleMonth.year, visibleMonth.month);
     final digests = _dayDigests(
-      tasks: tasks,
       notes: notes,
       notifications: scheduledNotifications,
       month: month,
@@ -2383,29 +2250,19 @@ final class _DayDigest {
   const _DayDigest({
     required this.date,
     required this.notes,
-    required this.tasks,
     required this.notifications,
   });
 
   final DateTime date;
   final List<NoteItem> notes;
-  final List<TaskItem> tasks;
   final List<ScheduledNotificationRecord> notifications;
 
-  int get alertCount {
-    final owners = <String>{
-      for (final task in tasks) 'task:${task.id}',
-      for (final notification in notifications)
-        '${notification.ownerType.name}:${notification.ownerId}',
-    };
-    return owners.length;
-  }
+  int get alertCount => notifications.length;
 
   int get count => notes.length + alertCount;
 }
 
 List<_DayDigest> _dayDigests({
-  required List<TaskItem> tasks,
   required List<NoteItem> notes,
   required List<ScheduledNotificationRecord> notifications,
   required DateTime month,
@@ -2420,20 +2277,6 @@ List<_DayDigest> _dayDigests({
     }
     dates.add(date);
     notesByDate.putIfAbsent(date, () => <NoteItem>[]).add(note);
-  }
-
-  final tasksByDate = <DateTime, List<TaskItem>>{};
-  for (final task in tasks) {
-    final dueAtUtc = task.dueAtUtc;
-    if (dueAtUtc == null || task.isDone || !task.reminderEnabled) {
-      continue;
-    }
-    final date = dateOnly(dueAtUtc);
-    if (!_isSameMonth(date, month)) {
-      continue;
-    }
-    dates.add(date);
-    tasksByDate.putIfAbsent(date, () => <TaskItem>[]).add(task);
   }
 
   final notificationsByDate = <DateTime, List<ScheduledNotificationRecord>>{};
@@ -2454,7 +2297,6 @@ List<_DayDigest> _dayDigests({
       _DayDigest(
         date: date,
         notes: notesByDate[date] ?? const <NoteItem>[],
-        tasks: tasksByDate[date] ?? const <TaskItem>[],
         notifications:
             notificationsByDate[date] ?? const <ScheduledNotificationRecord>[],
       ),
@@ -2560,35 +2402,37 @@ final class _CardMetricLine extends StatelessWidget {
 
 final class _NotesView extends StatelessWidget {
   const _NotesView({
-    required this.tasks,
     required this.notes,
+    required this.scheduledNotifications,
+    required this.noteHistory,
     required this.selectedNoteId,
     required this.selectedDate,
     required this.controller,
-    required this.dayCounts,
-    required this.onSelectDate,
-    required this.onOpenDayEditor,
-    required this.onAddTaskForDate,
+    required this.onOpenCalendar,
+    required this.onAddNotification,
+    required this.onEditNotification,
+    required this.onCancelNotification,
     required this.onAddNote,
     required this.onRenameNote,
     required this.onDeleteNote,
-    required this.onCreateTaskFromNote,
+    required this.onRestoreRevision,
     required this.onBodyChanged,
   });
 
-  final List<TaskItem> tasks;
   final List<NoteItem> notes;
+  final List<ScheduledNotificationRecord> scheduledNotifications;
+  final List<NoteEditRevision> noteHistory;
   final String? selectedNoteId;
   final DateTime selectedDate;
   final TextEditingController controller;
-  final Map<DateTime, int> dayCounts;
-  final ValueChanged<DateTime> onSelectDate;
-  final ValueChanged<DateTime> onOpenDayEditor;
-  final ValueChanged<DateTime> onAddTaskForDate;
+  final VoidCallback onOpenCalendar;
+  final VoidCallback onAddNotification;
+  final ValueChanged<ScheduledNotificationRecord> onEditNotification;
+  final ValueChanged<ScheduledNotificationRecord> onCancelNotification;
   final VoidCallback onAddNote;
   final VoidCallback onRenameNote;
   final VoidCallback onDeleteNote;
-  final VoidCallback onCreateTaskFromNote;
+  final ValueChanged<NoteEditRevision> onRestoreRevision;
   final ValueChanged<String> onBodyChanged;
 
   @override
@@ -2596,60 +2440,52 @@ final class _NotesView extends StatelessWidget {
     final selected = notes
         .where((note) => note.id == selectedNoteId)
         .firstOrNull;
-    final dayTasks = tasksDueOnDate(tasks, selectedDate);
     final dailyTitle = dailyNoteTitle(selectedDate);
     final isDailyNote = selected != null && dailyNoteDate(selected) != null;
+    final selectedNotifications =
+        scheduledNotifications.where((record) {
+          if (selected != null && record.ownerId == selected.id) {
+            return true;
+          }
+          return isSameDate(record.scheduledForUtc, selectedDate);
+        }).toList()..sort(
+          (left, right) =>
+              left.scheduledForUtc.compareTo(right.scheduledForUtc),
+        );
+    final selectedHistory = selected == null
+        ? noteHistory
+        : noteHistory
+              .where((revision) => revision.noteId == selected.id)
+              .toList();
 
     return _PageFrame(
       title: 'Notas',
       subtitle: formatLocalDate(selectedDate),
-      trailing: const _StatusPill(
-        icon: Icons.article_outlined,
-        label: 'Markdown',
-      ),
+      trailing: const _StatusPill(icon: Icons.save_outlined, label: 'Autosave'),
       child: _Surface(
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 980;
-            final calendar = AgendaCalendar(
-              selectedDate: selectedDate,
-              taskCounts: dayCounts,
-              onDateSelected: onSelectDate,
-              onEditDate: onOpenDayEditor,
-            );
             final editor = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Row(
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            selected?.title ?? dailyTitle,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            dayTasks.isEmpty
-                                ? 'Sem alerta neste dia'
-                                : '${dayTasks.length} alerta(s) neste dia',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
+                    FilledButton.icon(
+                      onPressed: onOpenCalendar,
+                      icon: const Icon(Icons.calendar_month_outlined),
+                      label: const Text('Calendário'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(170, 48),
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => onOpenDayEditor(selectedDate),
-                      icon: const Icon(Icons.edit_calendar_outlined),
-                      tooltip: 'Editar dia',
-                    ),
-                    IconButton.filledTonal(
-                      onPressed: () => onAddTaskForDate(selectedDate),
+                    FilledButton.tonalIcon(
+                      onPressed: selected == null ? null : onAddNotification,
                       icon: const Icon(Icons.notification_add_outlined),
-                      tooltip: 'Adicionar alerta',
+                      label: const Text('Notificação'),
                     ),
                     IconButton(
                       onPressed: onAddNote,
@@ -2662,21 +2498,35 @@ final class _NotesView extends StatelessWidget {
                       tooltip: 'Renomear nota',
                     ),
                     IconButton(
-                      onPressed: selected == null ? null : onCreateTaskFromNote,
-                      icon: const Icon(Icons.add_task_outlined),
-                      tooltip: 'Criar tarefa desta nota',
-                    ),
-                    IconButton(
                       onPressed: selected == null ? null : onDeleteNote,
                       icon: const Icon(Icons.delete_outline),
                       tooltip: 'Excluir nota',
                     ),
                   ],
                 ),
+                const SizedBox(height: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      selected?.title ?? dailyTitle,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      selectedNotifications.isEmpty
+                          ? 'Sem notificação neste dia'
+                          : '${selectedNotifications.length} notificação(ões)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
                 if (!isDailyNote && selected != null) ...<Widget>[
                   const SizedBox(height: 10),
                   Text(
-                    'Nota geral selecionada. Use o calendário para abrir ou criar o diário de um dia.',
+                    'Nota geral selecionada. O botão Calendário volta para a seleção de dias.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -2711,27 +2561,125 @@ final class _NotesView extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 18),
+                _NotificationList(
+                  notifications: selectedNotifications,
+                  notes: notes,
+                  onEdit: onEditNotification,
+                  onCancel: onCancelNotification,
+                ),
+                const SizedBox(height: 18),
+                _RevisionList(
+                  revisions: selectedHistory,
+                  onRestore: onRestoreRevision,
+                ),
               ],
             );
-
-            if (wide) {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  SizedBox(width: 360, child: calendar),
-                  const SizedBox(width: 18),
-                  Expanded(child: editor),
-                ],
-              );
-            }
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[calendar, const SizedBox(height: 18), editor],
-            );
+            return editor;
           },
         ),
       ),
+    );
+  }
+}
+
+final class _NotificationList extends StatelessWidget {
+  const _NotificationList({
+    required this.notifications,
+    required this.notes,
+    required this.onEdit,
+    required this.onCancel,
+  });
+
+  final List<ScheduledNotificationRecord> notifications;
+  final List<NoteItem> notes;
+  final ValueChanged<ScheduledNotificationRecord> onEdit;
+  final ValueChanged<ScheduledNotificationRecord> onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const _SectionHeader(
+          icon: Icons.notifications_none_outlined,
+          title: 'Notificações',
+        ),
+        const SizedBox(height: 10),
+        if (notifications.isEmpty)
+          Text(
+            'Nenhuma notificação vinculada a esta data.',
+            style: Theme.of(context).textTheme.bodySmall,
+          )
+        else
+          for (final record in notifications)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.alarm_on_outlined),
+              title: Text(_notificationRecordTitle(record, notes)),
+              subtitle: Text(formatLocalDateTime(record.scheduledForUtc)),
+              trailing: Wrap(
+                spacing: 4,
+                children: <Widget>[
+                  IconButton(
+                    onPressed: () => onEdit(record),
+                    icon: const Icon(Icons.edit_outlined),
+                    tooltip: 'Editar notificação',
+                  ),
+                  IconButton(
+                    onPressed: () => onCancel(record),
+                    icon: const Icon(Icons.notifications_off_outlined),
+                    tooltip: 'Cancelar notificação',
+                  ),
+                ],
+              ),
+              onTap: () => onEdit(record),
+            ),
+      ],
+    );
+  }
+}
+
+final class _RevisionList extends StatelessWidget {
+  const _RevisionList({required this.revisions, required this.onRestore});
+
+  final List<NoteEditRevision> revisions;
+  final ValueChanged<NoteEditRevision> onRestore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const _SectionHeader(
+          icon: Icons.restore_outlined,
+          title: 'Histórico de autosave',
+        ),
+        const SizedBox(height: 10),
+        if (revisions.isEmpty)
+          Text(
+            'As versões anteriores aparecerão aqui enquanto você escreve.',
+            style: Theme.of(context).textTheme.bodySmall,
+          )
+        else
+          for (final revision in revisions.take(50))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.history_outlined),
+              title: Text(revision.noteTitle),
+              subtitle: Text(
+                '${formatLocalDateTime(revision.savedAtUtc)} · '
+                '${_revisionPreview(revision.body)}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: TextButton.icon(
+                onPressed: () => onRestore(revision),
+                icon: const Icon(Icons.restore_outlined),
+                label: const Text('Restaurar'),
+              ),
+            ),
+      ],
     );
   }
 }
@@ -2921,8 +2869,11 @@ final class _SyncView extends StatelessWidget {
                 const _SectionHeader(icon: Icons.hub_outlined, title: 'Estado'),
                 const SizedBox(height: 12),
                 _MetricLine('Device', deviceId),
-                _MetricLine('Tarefas', snapshot.tasks.length.toString()),
                 _MetricLine('Notas', snapshot.notes.length.toString()),
+                _MetricLine(
+                  'Notificações',
+                  snapshot.scheduledNotifications.length.toString(),
+                ),
                 _MetricLine(
                   'Exclusões',
                   snapshot.deletedRecords.length.toString(),
@@ -3226,53 +3177,6 @@ final class _SectionHeader extends StatelessWidget {
   }
 }
 
-final class _UpcomingTaskTile extends StatelessWidget {
-  const _UpcomingTaskTile({required this.task, required this.onTap});
-
-  final TaskItem task;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                Icons.event_available_outlined,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      task.title,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      taskMeta(task),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.open_in_new_outlined, size: 18),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 final class _NotificationRecordTile extends StatelessWidget {
   const _NotificationRecordTile({
     required this.record,
@@ -3287,7 +3191,7 @@ final class _NotificationRecordTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ownerLabel = switch (record.ownerType) {
-      ReminderOwnerType.task => 'Tarefa',
+      ReminderOwnerType.task => 'Notificação',
       ReminderOwnerType.note => 'Nota',
     };
 
@@ -3332,16 +3236,20 @@ final class _NotificationRecordTile extends StatelessWidget {
 
 String _notificationRecordTitle(
   ScheduledNotificationRecord record,
-  List<TaskItem> tasks,
+  List<NoteItem> notes,
 ) {
-  if (record.ownerType == ReminderOwnerType.task) {
-    final task = tasks
-        .where((candidate) => candidate.id == record.ownerId)
-        .firstOrNull;
-    return task?.title ?? record.ownerId;
+  if (record.title.trim().isNotEmpty) {
+    return record.title.trim();
   }
 
-  return record.ownerId;
+  if (record.ownerType == ReminderOwnerType.note) {
+    final note = notes
+        .where((candidate) => candidate.id == record.ownerId)
+        .firstOrNull;
+    return note?.title ?? 'Notificação';
+  }
+
+  return 'Notificação';
 }
 
 final class _MetricLine extends StatelessWidget {
@@ -3381,7 +3289,7 @@ final class _TimelineRow extends StatelessWidget {
     this.subtitle,
     required this.tone,
     this.onTap,
-    this.actionTooltip = 'Editar tarefa',
+    this.actionTooltip = 'Editar',
   });
 
   final String time;

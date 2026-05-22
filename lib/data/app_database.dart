@@ -42,6 +42,8 @@ class ScheduledNotificationRows extends Table {
   TextColumn get occurrenceKey => text()();
   DateTimeColumn get scheduledForUtc => dateTime()();
   TextColumn get payload => text()();
+  TextColumn get title => text().withDefault(const Constant(''))();
+  TextColumn get body => text().withDefault(const Constant(''))();
   TextColumn get scheduledTimeZone => text().withDefault(const Constant(''))();
 
   @override
@@ -70,7 +72,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -87,6 +89,16 @@ class AppDatabase extends _$AppDatabase {
           await migrator.addColumn(
             scheduledNotificationRows,
             scheduledNotificationRows.scheduledTimeZone,
+          );
+        }
+        if (from < 5) {
+          await migrator.addColumn(
+            scheduledNotificationRows,
+            scheduledNotificationRows.title,
+          );
+          await migrator.addColumn(
+            scheduledNotificationRows,
+            scheduledNotificationRows.body,
           );
         }
       },
@@ -233,6 +245,8 @@ ScheduledNotificationRecord _notificationFromRow(ScheduledNotificationRow row) {
     occurrenceKey: row.occurrenceKey,
     scheduledForUtc: row.scheduledForUtc.toUtc(),
     payload: row.payload,
+    title: row.title,
+    body: row.body,
     scheduledTimeZone: row.scheduledTimeZone,
   );
 }
@@ -249,6 +263,8 @@ ScheduledNotificationRowsCompanion _notificationToCompanion(
     occurrenceKey: record.occurrenceKey,
     scheduledForUtc: record.scheduledForUtc,
     payload: record.payload,
+    title: Value(record.title),
+    body: Value(record.body),
     scheduledTimeZone: Value(record.scheduledTimeZone),
   );
 }

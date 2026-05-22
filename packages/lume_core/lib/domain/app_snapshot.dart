@@ -195,42 +195,8 @@ final class AppSnapshot {
   }
 
   factory AppSnapshot.seeded(DateTime nowUtc) {
-    final todayAfternoon = DateTime.utc(
-      nowUtc.year,
-      nowUtc.month,
-      nowUtc.day,
-      19,
-      20,
-    );
-
     return AppSnapshot(
-      tasks: <TaskItem>[
-        TaskItem(
-          id: 'task-week-plan',
-          title: 'Fechar roteiro da semana',
-          description: 'Primeira tarefa real do fluxo local.',
-          status: TaskStatus.open,
-          dueAtUtc: todayAfternoon,
-          createdAtUtc: nowUtc,
-          updatedAtUtc: nowUtc,
-        ),
-        TaskItem(
-          id: 'task-review-note',
-          title: 'Revisar nota do app pessoal',
-          description: 'Sem vínculo obrigatório com calendário.',
-          status: TaskStatus.open,
-          createdAtUtc: nowUtc,
-          updatedAtUtc: nowUtc,
-        ),
-        TaskItem(
-          id: 'task-notification-spike',
-          title: 'Enviar teste de notificação',
-          status: TaskStatus.done,
-          completedAtUtc: nowUtc,
-          createdAtUtc: nowUtc,
-          updatedAtUtc: nowUtc,
-        ),
-      ],
+      tasks: const <TaskItem>[],
       notes: <NoteItem>[
         NoteItem(
           id: 'note-inbox',

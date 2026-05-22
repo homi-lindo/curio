@@ -16,7 +16,7 @@ void main() {
       expect(result.pushedRecords, 0);
       expect(result.pulledRecords, 0);
       expect(result.tombstones, 0);
-      expect(result.message, contains('4 registro(s)'));
+      expect(result.message, contains('1 registro(s)'));
     },
   );
 

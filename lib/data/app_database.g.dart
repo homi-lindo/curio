@@ -1101,6 +1101,26 @@ class $ScheduledNotificationRowsTable extends ScheduledNotificationRows
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _bodyMeta = const VerificationMeta('body');
+  @override
+  late final GeneratedColumn<String> body = GeneratedColumn<String>(
+    'body',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
   static const VerificationMeta _scheduledTimeZoneMeta = const VerificationMeta(
     'scheduledTimeZone',
   );
@@ -1124,6 +1144,8 @@ class $ScheduledNotificationRowsTable extends ScheduledNotificationRows
     occurrenceKey,
     scheduledForUtc,
     payload,
+    title,
+    body,
     scheduledTimeZone,
   ];
   @override
@@ -1206,6 +1228,18 @@ class $ScheduledNotificationRowsTable extends ScheduledNotificationRows
     } else if (isInserting) {
       context.missing(_payloadMeta);
     }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    }
+    if (data.containsKey('body')) {
+      context.handle(
+        _bodyMeta,
+        body.isAcceptableOrUnknown(data['body']!, _bodyMeta),
+      );
+    }
     if (data.containsKey('scheduled_time_zone')) {
       context.handle(
         _scheduledTimeZoneMeta,
@@ -1259,6 +1293,14 @@ class $ScheduledNotificationRowsTable extends ScheduledNotificationRows
         DriftSqlType.string,
         data['${effectivePrefix}payload'],
       )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      body: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}body'],
+      )!,
       scheduledTimeZone: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}scheduled_time_zone'],
@@ -1282,6 +1324,8 @@ class ScheduledNotificationRow extends DataClass
   final String occurrenceKey;
   final DateTime scheduledForUtc;
   final String payload;
+  final String title;
+  final String body;
   final String scheduledTimeZone;
   const ScheduledNotificationRow({
     required this.id,
@@ -1292,6 +1336,8 @@ class ScheduledNotificationRow extends DataClass
     required this.occurrenceKey,
     required this.scheduledForUtc,
     required this.payload,
+    required this.title,
+    required this.body,
     required this.scheduledTimeZone,
   });
   @override
@@ -1305,6 +1351,8 @@ class ScheduledNotificationRow extends DataClass
     map['occurrence_key'] = Variable<String>(occurrenceKey);
     map['scheduled_for_utc'] = Variable<DateTime>(scheduledForUtc);
     map['payload'] = Variable<String>(payload);
+    map['title'] = Variable<String>(title);
+    map['body'] = Variable<String>(body);
     map['scheduled_time_zone'] = Variable<String>(scheduledTimeZone);
     return map;
   }
@@ -1319,6 +1367,8 @@ class ScheduledNotificationRow extends DataClass
       occurrenceKey: Value(occurrenceKey),
       scheduledForUtc: Value(scheduledForUtc),
       payload: Value(payload),
+      title: Value(title),
+      body: Value(body),
       scheduledTimeZone: Value(scheduledTimeZone),
     );
   }
@@ -1337,6 +1387,8 @@ class ScheduledNotificationRow extends DataClass
       occurrenceKey: serializer.fromJson<String>(json['occurrenceKey']),
       scheduledForUtc: serializer.fromJson<DateTime>(json['scheduledForUtc']),
       payload: serializer.fromJson<String>(json['payload']),
+      title: serializer.fromJson<String>(json['title']),
+      body: serializer.fromJson<String>(json['body']),
       scheduledTimeZone: serializer.fromJson<String>(json['scheduledTimeZone']),
     );
   }
@@ -1352,6 +1404,8 @@ class ScheduledNotificationRow extends DataClass
       'occurrenceKey': serializer.toJson<String>(occurrenceKey),
       'scheduledForUtc': serializer.toJson<DateTime>(scheduledForUtc),
       'payload': serializer.toJson<String>(payload),
+      'title': serializer.toJson<String>(title),
+      'body': serializer.toJson<String>(body),
       'scheduledTimeZone': serializer.toJson<String>(scheduledTimeZone),
     };
   }
@@ -1365,6 +1419,8 @@ class ScheduledNotificationRow extends DataClass
     String? occurrenceKey,
     DateTime? scheduledForUtc,
     String? payload,
+    String? title,
+    String? body,
     String? scheduledTimeZone,
   }) => ScheduledNotificationRow(
     id: id ?? this.id,
@@ -1375,6 +1431,8 @@ class ScheduledNotificationRow extends DataClass
     occurrenceKey: occurrenceKey ?? this.occurrenceKey,
     scheduledForUtc: scheduledForUtc ?? this.scheduledForUtc,
     payload: payload ?? this.payload,
+    title: title ?? this.title,
+    body: body ?? this.body,
     scheduledTimeZone: scheduledTimeZone ?? this.scheduledTimeZone,
   );
   ScheduledNotificationRow copyWithCompanion(
@@ -1395,6 +1453,8 @@ class ScheduledNotificationRow extends DataClass
           ? data.scheduledForUtc.value
           : this.scheduledForUtc,
       payload: data.payload.present ? data.payload.value : this.payload,
+      title: data.title.present ? data.title.value : this.title,
+      body: data.body.present ? data.body.value : this.body,
       scheduledTimeZone: data.scheduledTimeZone.present
           ? data.scheduledTimeZone.value
           : this.scheduledTimeZone,
@@ -1412,6 +1472,8 @@ class ScheduledNotificationRow extends DataClass
           ..write('occurrenceKey: $occurrenceKey, ')
           ..write('scheduledForUtc: $scheduledForUtc, ')
           ..write('payload: $payload, ')
+          ..write('title: $title, ')
+          ..write('body: $body, ')
           ..write('scheduledTimeZone: $scheduledTimeZone')
           ..write(')'))
         .toString();
@@ -1427,6 +1489,8 @@ class ScheduledNotificationRow extends DataClass
     occurrenceKey,
     scheduledForUtc,
     payload,
+    title,
+    body,
     scheduledTimeZone,
   );
   @override
@@ -1441,6 +1505,8 @@ class ScheduledNotificationRow extends DataClass
           other.occurrenceKey == this.occurrenceKey &&
           other.scheduledForUtc == this.scheduledForUtc &&
           other.payload == this.payload &&
+          other.title == this.title &&
+          other.body == this.body &&
           other.scheduledTimeZone == this.scheduledTimeZone);
 }
 
@@ -1454,6 +1520,8 @@ class ScheduledNotificationRowsCompanion
   final Value<String> occurrenceKey;
   final Value<DateTime> scheduledForUtc;
   final Value<String> payload;
+  final Value<String> title;
+  final Value<String> body;
   final Value<String> scheduledTimeZone;
   const ScheduledNotificationRowsCompanion({
     this.id = const Value.absent(),
@@ -1464,6 +1532,8 @@ class ScheduledNotificationRowsCompanion
     this.occurrenceKey = const Value.absent(),
     this.scheduledForUtc = const Value.absent(),
     this.payload = const Value.absent(),
+    this.title = const Value.absent(),
+    this.body = const Value.absent(),
     this.scheduledTimeZone = const Value.absent(),
   });
   ScheduledNotificationRowsCompanion.insert({
@@ -1475,6 +1545,8 @@ class ScheduledNotificationRowsCompanion
     required String occurrenceKey,
     required DateTime scheduledForUtc,
     required String payload,
+    this.title = const Value.absent(),
+    this.body = const Value.absent(),
     this.scheduledTimeZone = const Value.absent(),
   }) : deviceId = Value(deviceId),
        reminderIntentId = Value(reminderIntentId),
@@ -1492,6 +1564,8 @@ class ScheduledNotificationRowsCompanion
     Expression<String>? occurrenceKey,
     Expression<DateTime>? scheduledForUtc,
     Expression<String>? payload,
+    Expression<String>? title,
+    Expression<String>? body,
     Expression<String>? scheduledTimeZone,
   }) {
     return RawValuesInsertable({
@@ -1503,6 +1577,8 @@ class ScheduledNotificationRowsCompanion
       if (occurrenceKey != null) 'occurrence_key': occurrenceKey,
       if (scheduledForUtc != null) 'scheduled_for_utc': scheduledForUtc,
       if (payload != null) 'payload': payload,
+      if (title != null) 'title': title,
+      if (body != null) 'body': body,
       if (scheduledTimeZone != null) 'scheduled_time_zone': scheduledTimeZone,
     });
   }
@@ -1516,6 +1592,8 @@ class ScheduledNotificationRowsCompanion
     Value<String>? occurrenceKey,
     Value<DateTime>? scheduledForUtc,
     Value<String>? payload,
+    Value<String>? title,
+    Value<String>? body,
     Value<String>? scheduledTimeZone,
   }) {
     return ScheduledNotificationRowsCompanion(
@@ -1527,6 +1605,8 @@ class ScheduledNotificationRowsCompanion
       occurrenceKey: occurrenceKey ?? this.occurrenceKey,
       scheduledForUtc: scheduledForUtc ?? this.scheduledForUtc,
       payload: payload ?? this.payload,
+      title: title ?? this.title,
+      body: body ?? this.body,
       scheduledTimeZone: scheduledTimeZone ?? this.scheduledTimeZone,
     );
   }
@@ -1558,6 +1638,12 @@ class ScheduledNotificationRowsCompanion
     if (payload.present) {
       map['payload'] = Variable<String>(payload.value);
     }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (body.present) {
+      map['body'] = Variable<String>(body.value);
+    }
     if (scheduledTimeZone.present) {
       map['scheduled_time_zone'] = Variable<String>(scheduledTimeZone.value);
     }
@@ -1575,6 +1661,8 @@ class ScheduledNotificationRowsCompanion
           ..write('occurrenceKey: $occurrenceKey, ')
           ..write('scheduledForUtc: $scheduledForUtc, ')
           ..write('payload: $payload, ')
+          ..write('title: $title, ')
+          ..write('body: $body, ')
           ..write('scheduledTimeZone: $scheduledTimeZone')
           ..write(')'))
         .toString();
@@ -2439,6 +2527,8 @@ typedef $$ScheduledNotificationRowsTableCreateCompanionBuilder =
       required String occurrenceKey,
       required DateTime scheduledForUtc,
       required String payload,
+      Value<String> title,
+      Value<String> body,
       Value<String> scheduledTimeZone,
     });
 typedef $$ScheduledNotificationRowsTableUpdateCompanionBuilder =
@@ -2451,6 +2541,8 @@ typedef $$ScheduledNotificationRowsTableUpdateCompanionBuilder =
       Value<String> occurrenceKey,
       Value<DateTime> scheduledForUtc,
       Value<String> payload,
+      Value<String> title,
+      Value<String> body,
       Value<String> scheduledTimeZone,
     });
 
@@ -2500,6 +2592,16 @@ class $$ScheduledNotificationRowsTableFilterComposer
 
   ColumnFilters<String> get payload => $composableBuilder(
     column: $table.payload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get body => $composableBuilder(
+    column: $table.body,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2558,6 +2660,16 @@ class $$ScheduledNotificationRowsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get scheduledTimeZone => $composableBuilder(
     column: $table.scheduledTimeZone,
     builder: (column) => ColumnOrderings(column),
@@ -2602,6 +2714,12 @@ class $$ScheduledNotificationRowsTableAnnotationComposer
 
   GeneratedColumn<String> get payload =>
       $composableBuilder(column: $table.payload, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get body =>
+      $composableBuilder(column: $table.body, builder: (column) => column);
 
   GeneratedColumn<String> get scheduledTimeZone => $composableBuilder(
     column: $table.scheduledTimeZone,
@@ -2663,6 +2781,8 @@ class $$ScheduledNotificationRowsTableTableManager
                 Value<String> occurrenceKey = const Value.absent(),
                 Value<DateTime> scheduledForUtc = const Value.absent(),
                 Value<String> payload = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> body = const Value.absent(),
                 Value<String> scheduledTimeZone = const Value.absent(),
               }) => ScheduledNotificationRowsCompanion(
                 id: id,
@@ -2673,6 +2793,8 @@ class $$ScheduledNotificationRowsTableTableManager
                 occurrenceKey: occurrenceKey,
                 scheduledForUtc: scheduledForUtc,
                 payload: payload,
+                title: title,
+                body: body,
                 scheduledTimeZone: scheduledTimeZone,
               ),
           createCompanionCallback:
@@ -2685,6 +2807,8 @@ class $$ScheduledNotificationRowsTableTableManager
                 required String occurrenceKey,
                 required DateTime scheduledForUtc,
                 required String payload,
+                Value<String> title = const Value.absent(),
+                Value<String> body = const Value.absent(),
                 Value<String> scheduledTimeZone = const Value.absent(),
               }) => ScheduledNotificationRowsCompanion.insert(
                 id: id,
@@ -2695,6 +2819,8 @@ class $$ScheduledNotificationRowsTableTableManager
                 occurrenceKey: occurrenceKey,
                 scheduledForUtc: scheduledForUtc,
                 payload: payload,
+                title: title,
+                body: body,
                 scheduledTimeZone: scheduledTimeZone,
               ),
           withReferenceMapper: (p0) => p0

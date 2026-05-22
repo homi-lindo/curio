@@ -64,11 +64,12 @@ final class HttpSyncAdapter implements SyncAdapter {
       startedAtUtc: started,
       finishedAtUtc: finished,
       snapshot: merged,
-      pushedRecords: snapshot.tasks.length + snapshot.notes.length,
-      pulledRecords: remote.tasks.length + remote.notes.length,
+      pushedRecords: snapshot.notes.length,
+      pulledRecords: remote.notes.length,
       tombstones: merged.deletedRecords.length,
       message:
-          'sync ok: ${remote.tasks.length} tarefa(s), ${remote.notes.length} nota(s)',
+          'sync ok: ${remote.notes.length} nota(s), '
+          '${remote.scheduledNotifications.length} notificação(ões)',
     );
   }
 

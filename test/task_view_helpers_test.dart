@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lume/ui/task_view_helpers.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
+import 'package:lume_core/domain/reminder.dart';
 
 void main() {
   test('filters tasks by status, due date and query', () {
@@ -92,41 +93,48 @@ void main() {
     expect(taskMeta(task, now: now), contains('nota'));
   });
 
-  test('global search finds tasks and notes without accent sensitivity', () {
-    final now = DateTime.utc(2026, 5, 21, 9);
-    final snapshot = AppSnapshot(
-      tasks: <TaskItem>[
-        _task(
-          id: 'task-cafe',
-          title: 'Comprar café',
-          description: 'Passar no mercado depois do trabalho.',
-          dueAtUtc: now.add(const Duration(hours: 3)),
-          reminderEnabled: true,
-          updatedAtUtc: now,
-        ),
-      ],
-      notes: <NoteItem>[
-        NoteItem(
-          id: 'note-sync',
-          title: 'Roteiro do servidor',
-          body: 'Preparar kit self hosted para o Curió.',
-          createdAtUtc: now,
-          updatedAtUtc: now.add(const Duration(minutes: 1)),
-        ),
-      ],
-      scheduledNotifications: const [],
-    );
+  test(
+    'global search finds notes and notifications without accent sensitivity',
+    () {
+      final now = DateTime.utc(2026, 5, 21, 9);
+      final snapshot = AppSnapshot(
+        tasks: const <TaskItem>[],
+        notes: <NoteItem>[
+          NoteItem(
+            id: 'note-sync',
+            title: 'Roteiro do servidor',
+            body: 'Preparar kit self hosted para o Curió.',
+            createdAtUtc: now,
+            updatedAtUtc: now.add(const Duration(minutes: 1)),
+          ),
+        ],
+        scheduledNotifications: <ScheduledNotificationRecord>[
+          ScheduledNotificationRecord(
+            id: 42,
+            deviceId: 'curio-test',
+            reminderIntentId: 'note-note-sync-alert',
+            ownerId: 'note-sync',
+            ownerType: ReminderOwnerType.note,
+            occurrenceKey: '2026-05-21T12:00:00.000Z',
+            scheduledForUtc: now.add(const Duration(hours: 3)),
+            payload: 'curio://reminder/note-note-sync-alert',
+            title: 'Comprar café',
+            body: 'Passar no mercado depois do trabalho.',
+          ),
+        ],
+      );
 
-    expect(normalizeSearchText('Curió café ação'), 'curio cafe acao');
+      expect(normalizeSearchText('Curió café ação'), 'curio cafe acao');
 
-    final cafeResults = searchSnapshotText(snapshot, 'cafe');
-    expect(cafeResults.map((result) => result.id), <String>['task-cafe']);
-    expect(cafeResults.single.kind, GlobalSearchResultKind.task);
+      final cafeResults = searchSnapshotText(snapshot, 'cafe');
+      expect(cafeResults.map((result) => result.id), <String>['42']);
+      expect(cafeResults.single.kind, GlobalSearchResultKind.notification);
 
-    final curioResults = searchSnapshotText(snapshot, 'curio');
-    expect(curioResults.map((result) => result.id), <String>['note-sync']);
-    expect(curioResults.single.kind, GlobalSearchResultKind.note);
-  });
+      final curioResults = searchSnapshotText(snapshot, 'curio');
+      expect(curioResults.map((result) => result.id), <String>['note-sync']);
+      expect(curioResults.single.kind, GlobalSearchResultKind.note);
+    },
+  );
 
   test('calendar helpers expose years through 2035 and count dated tasks', () {
     final now = DateTime(2026, 5, 21);

@@ -195,6 +195,8 @@ final class NotificationService {
         occurrenceKey: plan.occurrenceKey,
         scheduledForUtc: plan.scheduledUtc,
         payload: payload,
+        title: title,
+        body: body,
         scheduledTimeZone: localTimeZoneId,
       ),
       matchDateTimeComponents: matchComponents,
@@ -215,8 +217,7 @@ final class NotificationService {
     android: AndroidNotificationDetails(
       'lume_reminders',
       '$appDisplayName reminders',
-      channelDescription:
-          'Lembretes da agenda e das tarefas do $appDisplayName',
+      channelDescription: 'Lembretes de notas e agenda do $appDisplayName',
       importance: Importance.max,
       priority: Priority.high,
       category: AndroidNotificationCategory.reminder,

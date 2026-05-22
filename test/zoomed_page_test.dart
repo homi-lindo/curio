@@ -11,7 +11,6 @@ void main() {
       'zoomed page keeps agenda actions tappable at ${scale * 100}%',
       (tester) async {
         var selected = DateTime(2026, 5, 21);
-        DateTime? editDate;
 
         await tester.pumpWidget(
           MaterialApp(
@@ -27,11 +26,10 @@ void main() {
                         child: AgendaCalendar(
                           selectedDate: selected,
                           now: DateTime(2026, 5, 21),
-                          taskCounts: const <DateTime, int>{},
+                          dayCounts: const <DateTime, int>{},
                           onDateSelected: (value) {
                             setState(() => selected = value);
                           },
-                          onEditDate: (value) => editDate = value,
                         ),
                       ),
                     ),
@@ -42,12 +40,17 @@ void main() {
           ),
         );
 
-        await tester.ensureVisible(find.byTooltip('Editar dia'));
+        final day22 = find.byKey(
+          ValueKey<String>(
+            'agenda-day-${DateTime(2026, 5, 22).toIso8601String()}',
+          ),
+        );
+        await tester.ensureVisible(day22);
         await tester.pump();
-        await tester.tap(find.byTooltip('Editar dia'));
+        await tester.tap(day22);
         await tester.pump();
 
-        expect(editDate, DateTime(2026, 5, 21));
+        expect(selected, DateTime(2026, 5, 22));
       },
     );
   }

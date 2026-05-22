@@ -6,7 +6,7 @@ import 'package:lume/data/app_database.dart';
 
 void main() {
   test(
-    'database migration v1 to v4 adds sync and notification columns',
+    'database migration v1 to v5 adds sync and notification columns',
     () async {
       final temp = await Directory.systemTemp.createTemp(
         'lume_migration_test_',
@@ -87,6 +87,10 @@ void main() {
       expect(
         notificationColumns.map((row) => row.data['name']),
         contains('scheduled_time_zone'),
+      );
+      expect(
+        notificationColumns.map((row) => row.data['name']),
+        containsAll(<String>['title', 'body']),
       );
       expect(deletedTable, hasLength(1));
     },

@@ -6,18 +6,18 @@ final class AgendaCalendar extends StatelessWidget {
   const AgendaCalendar({
     super.key,
     required this.selectedDate,
-    required this.taskCounts,
+    required this.dayCounts,
     required this.onDateSelected,
-    required this.onEditDate,
+    this.onEditDate,
     this.onVisibleDateChanged,
     this.throughYear = agendaThroughYear,
     this.now,
   });
 
   final DateTime selectedDate;
-  final Map<DateTime, int> taskCounts;
+  final Map<DateTime, int> dayCounts;
   final ValueChanged<DateTime> onDateSelected;
-  final ValueChanged<DateTime> onEditDate;
+  final ValueChanged<DateTime>? onEditDate;
   final ValueChanged<DateTime>? onVisibleDateChanged;
   final int throughYear;
   final DateTime? now;
@@ -26,7 +26,6 @@ final class AgendaCalendar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final selected = dateOnly(selectedDate);
-    final years = agendaYears(now: now, throughYear: throughYear);
     final months = List<int>.generate(12, (index) => index + 1);
     final dayCount = daysInMonth(selected.year, selected.month);
     final leadingBlanks = DateTime(selected.year, selected.month).weekday - 1;
@@ -53,25 +52,34 @@ final class AgendaCalendar extends StatelessWidget {
                 ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: <Widget>[
-            for (final year in years)
-              ChoiceChip(
-                label: Text(year.toString()),
-                selected: selected.year == year,
-                onSelected: (_) => navigate(
-                  sameDayOrLastValidDate(
-                    year: year,
-                    month: selected.month,
-                    preferredDay: selected.day,
-                  ),
+            IconButton(
+              onPressed: () => navigate(
+                sameDayOrLastValidDate(
+                  year: selected.year - 1,
+                  month: selected.month,
+                  preferredDay: selected.day,
                 ),
               ),
+              icon: const Icon(Icons.chevron_left_outlined),
+              tooltip: 'Ano anterior',
+            ),
+            Text(
+              selected.year.toString(),
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            IconButton(
+              onPressed: () => navigate(
+                sameDayOrLastValidDate(
+                  year: selected.year + 1,
+                  month: selected.month,
+                  preferredDay: selected.day,
+                ),
+              ),
+              icon: const Icon(Icons.chevron_right_outlined),
+              tooltip: 'Próximo ano',
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -128,14 +136,13 @@ final class AgendaCalendar extends StatelessWidget {
             final day = index - leadingBlanks + 1;
             final date = DateTime(selected.year, selected.month, day);
             final selectedDay = isSameDate(date, selected);
-            final count = taskCounts[date] ?? 0;
+            final count = dayCounts[date] ?? 0;
             return _CalendarDayButton(
               key: ValueKey<String>('agenda-day-${date.toIso8601String()}'),
               date: date,
               selected: selectedDay,
-              taskCount: count,
+              entryCount: count,
               onTap: () => onDateSelected(date),
-              onEdit: () => onEditDate(date),
             );
           },
         ),
@@ -149,16 +156,14 @@ final class _CalendarDayButton extends StatelessWidget {
     super.key,
     required this.date,
     required this.selected,
-    required this.taskCount,
+    required this.entryCount,
     required this.onTap,
-    required this.onEdit,
   });
 
   final DateTime date;
   final bool selected;
-  final int taskCount;
+  final int entryCount;
   final VoidCallback onTap;
-  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -185,10 +190,10 @@ final class _CalendarDayButton extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if (taskCount > 0) ...<Widget>[
+                  if (entryCount > 0) ...<Widget>[
                     const SizedBox(width: 4),
                     Text(
-                      taskCount.toString(),
+                      entryCount.toString(),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: selected ? scheme.onPrimary : scheme.primary,
                         fontWeight: FontWeight.w800,
@@ -197,50 +202,9 @@ final class _CalendarDayButton extends StatelessWidget {
                   ],
                 ],
               ),
-              if (selected) ...<Widget>[
-                const SizedBox(height: 2),
-                _CalendarDayAction(
-                  icon: Icons.edit_outlined,
-                  tooltip: 'Editar dia',
-                  selected: selected,
-                  onPressed: onEdit,
-                ),
-              ],
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-final class _CalendarDayAction extends StatelessWidget {
-  const _CalendarDayAction({
-    required this.icon,
-    required this.tooltip,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 15),
-      tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 24, height: 22),
-      style: IconButton.styleFrom(
-        foregroundColor: selected
-            ? Theme.of(context).colorScheme.onPrimary
-            : null,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }

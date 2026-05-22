@@ -2,13 +2,14 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
+import 'package:lume_core/domain/reminder.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 enum TaskFilter { open, today, scheduled, done, all }
 
 const agendaThroughYear = 2035;
 
-enum GlobalSearchResultKind { task, note }
+enum GlobalSearchResultKind { note, notification }
 
 final class GlobalSearchResult {
   const GlobalSearchResult({
@@ -20,6 +21,7 @@ final class GlobalSearchResult {
     required this.updatedAtUtc,
     this.task,
     this.note,
+    this.notification,
     this.rank = 1,
   });
 
@@ -31,6 +33,7 @@ final class GlobalSearchResult {
   final DateTime updatedAtUtc;
   final TaskItem? task;
   final NoteItem? note;
+  final ScheduledNotificationRecord? notification;
   final int rank;
 }
 
@@ -65,32 +68,6 @@ List<GlobalSearchResult> searchSnapshotText(
 
   final results = <GlobalSearchResult>[];
 
-  for (final task in snapshot.tasks) {
-    final title = task.title.trim();
-    final description = task.description.trim();
-    final meta = taskMeta(task);
-    final haystack = normalizeSearchText('$title\n$description\n$meta');
-    if (!haystack.contains(normalizedQuery)) {
-      continue;
-    }
-
-    results.add(
-      GlobalSearchResult(
-        kind: GlobalSearchResultKind.task,
-        id: task.id,
-        title: title,
-        subtitle: 'Tarefa · $meta',
-        preview: _searchPreview(
-          description.isEmpty ? meta : description,
-          normalizedQuery,
-        ),
-        updatedAtUtc: task.updatedAtUtc,
-        task: task,
-        rank: normalizeSearchText(title).contains(normalizedQuery) ? 0 : 1,
-      ),
-    );
-  }
-
   for (final note in snapshot.notes) {
     final title = note.title.trim();
     final body = note.body.trim();
@@ -108,6 +85,32 @@ List<GlobalSearchResult> searchSnapshotText(
         preview: _searchPreview(body.isEmpty ? title : body, normalizedQuery),
         updatedAtUtc: note.updatedAtUtc,
         note: note,
+        rank: normalizeSearchText(title).contains(normalizedQuery) ? 0 : 1,
+      ),
+    );
+  }
+
+  for (final notification in snapshot.scheduledNotifications) {
+    final title = notification.title.trim().isEmpty
+        ? 'Notificação'
+        : notification.title.trim();
+    final body = notification.body.trim();
+    final meta =
+        'Notificação · ${formatLocalDateTime(notification.scheduledForUtc)}';
+    final haystack = normalizeSearchText('$title\n$body\n$meta');
+    if (!haystack.contains(normalizedQuery)) {
+      continue;
+    }
+
+    results.add(
+      GlobalSearchResult(
+        kind: GlobalSearchResultKind.notification,
+        id: notification.id.toString(),
+        title: title,
+        subtitle: meta,
+        preview: _searchPreview(body.isEmpty ? meta : body, normalizedQuery),
+        updatedAtUtc: notification.scheduledForUtc,
+        notification: notification,
         rank: normalizeSearchText(title).contains(normalizedQuery) ? 0 : 1,
       ),
     );
@@ -369,7 +372,7 @@ const _searchDiacritics = <String, String>{
   'ñ': 'n',
 };
 
-Color taskTone(int index) {
+Color entryTone(int index) {
   const tones = <Color>[
     Color(0xFF4D6B5F),
     Color(0xFF396D86),

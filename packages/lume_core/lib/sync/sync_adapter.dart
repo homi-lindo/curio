@@ -36,7 +36,7 @@ final class OfflineSyncAdapter implements SyncAdapter {
     required String deviceId,
   }) async {
     final now = DateTime.now().toUtc();
-    final recordCount = snapshot.tasks.length + snapshot.notes.length;
+    final recordCount = snapshot.notes.length;
     final tombstones = snapshot.deletedRecords.length;
 
     return SyncResult(
