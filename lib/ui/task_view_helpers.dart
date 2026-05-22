@@ -283,6 +283,39 @@ Map<DateTime, int> noteCountsByDate(Iterable<NoteItem> notes) {
   return counts;
 }
 
+List<NoteItem> dailyNotesForDate(Iterable<NoteItem> notes, DateTime date) {
+  return notes.where((note) {
+      final noteDate = dailyNoteDate(note);
+      return noteDate != null && isSameDate(noteDate, date);
+    }).toList()
+    ..sort((left, right) => right.updatedAtUtc.compareTo(left.updatedAtUtc));
+}
+
+List<ScheduledNotificationRecord> notificationsForDate(
+  Iterable<ScheduledNotificationRecord> notifications,
+  DateTime date,
+) {
+  return notifications
+      .where((record) => isSameDate(record.scheduledForUtc, date))
+      .toList()
+    ..sort(
+      (left, right) => left.scheduledForUtc.compareTo(right.scheduledForUtc),
+    );
+}
+
+List<ScheduledNotificationRecord> upcomingNotifications(
+  Iterable<ScheduledNotificationRecord> notifications, {
+  DateTime? nowUtc,
+}) {
+  final now = (nowUtc ?? DateTime.now().toUtc()).toUtc();
+  return notifications
+      .where((record) => record.scheduledForUtc.toUtc().isAfter(now))
+      .toList()
+    ..sort(
+      (left, right) => left.scheduledForUtc.compareTo(right.scheduledForUtc),
+    );
+}
+
 String formatLocal(tz.TZDateTime dateTime) {
   final day = dateTime.day.toString().padLeft(2, '0');
   final month = dateTime.month.toString().padLeft(2, '0');

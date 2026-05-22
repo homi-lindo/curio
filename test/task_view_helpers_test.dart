@@ -167,6 +167,48 @@ void main() {
       <String>['first', 'second'],
     );
   });
+
+  test('day helpers collect daily notes and notification queues', () {
+    final day = DateTime(2026, 5, 22);
+    final notes = <NoteItem>[
+      _note(
+        id: 'today-old',
+        title: dailyNoteTitle(day),
+        updatedAtUtc: DateTime.utc(2026, 5, 22, 12),
+      ),
+      _note(
+        id: 'general',
+        title: 'Ideias soltas',
+        updatedAtUtc: DateTime.utc(2026, 5, 22, 13),
+      ),
+      _note(
+        id: 'today-new',
+        title: dailyNoteTitle(day),
+        updatedAtUtc: DateTime.utc(2026, 5, 22, 14),
+      ),
+    ];
+    final notifications = <ScheduledNotificationRecord>[
+      _notification(id: 1, scheduledForUtc: DateTime.utc(2026, 5, 22, 12)),
+      _notification(id: 2, scheduledForUtc: DateTime.utc(2026, 5, 23, 12)),
+      _notification(id: 3, scheduledForUtc: DateTime.utc(2026, 5, 22, 15)),
+    ];
+
+    expect(dailyNotesForDate(notes, day).map((note) => note.id), <String>[
+      'today-new',
+      'today-old',
+    ]);
+    expect(
+      notificationsForDate(notifications, day).map((record) => record.id),
+      <int>[1, 3],
+    );
+    expect(
+      upcomingNotifications(
+        notifications,
+        nowUtc: DateTime.utc(2026, 5, 22, 13),
+      ).map((record) => record.id),
+      <int>[3, 2],
+    );
+  });
 }
 
 TaskItem _task({
@@ -189,5 +231,36 @@ TaskItem _task({
     sourceNoteId: sourceNoteId,
     createdAtUtc: DateTime.utc(2026, 5, 21),
     updatedAtUtc: updatedAtUtc,
+  );
+}
+
+NoteItem _note({
+  required String id,
+  required String title,
+  required DateTime updatedAtUtc,
+}) {
+  return NoteItem(
+    id: id,
+    title: title,
+    body: 'corpo $id',
+    createdAtUtc: DateTime.utc(2026, 5, 21),
+    updatedAtUtc: updatedAtUtc,
+  );
+}
+
+ScheduledNotificationRecord _notification({
+  required int id,
+  required DateTime scheduledForUtc,
+}) {
+  return ScheduledNotificationRecord(
+    id: id,
+    deviceId: 'curio-test',
+    reminderIntentId: 'note-note-alert-$id',
+    ownerId: 'note-1',
+    ownerType: ReminderOwnerType.note,
+    occurrenceKey: scheduledForUtc.toIso8601String(),
+    scheduledForUtc: scheduledForUtc,
+    payload: 'curio://reminder/note-note-alert-$id',
+    title: 'Notificação $id',
   );
 }

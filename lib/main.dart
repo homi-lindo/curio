@@ -89,8 +89,6 @@ final class _CurioAppState extends State<CurioApp> {
   final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
-  ScheduleResult? _lastSchedule;
-  String? _lastNotificationLabel;
   int _pendingCount = 0;
   final List<String> _activity = <String>[];
 
@@ -124,12 +122,11 @@ final class _CurioAppState extends State<CurioApp> {
 
   Future<void> _initialize() async {
     await widget.notifications.initialize(
-      onNotificationSelected: (payload) {
+      onNotificationSelected: (_) {
         if (!mounted) {
           return;
         }
         setState(() {
-          _lastNotificationLabel = _notificationEventLabel(payload);
           _selectedIndex = 0;
         });
         _log('notificação aberta');
@@ -138,9 +135,7 @@ final class _CurioAppState extends State<CurioApp> {
 
     final launchDetails = await widget.notifications.getLaunchDetails();
     if (launchDetails?.didNotificationLaunchApp ?? false) {
-      _lastNotificationLabel = _notificationEventLabel(
-        launchDetails?.notificationResponse?.payload,
-      );
+      _log('app aberto por notificação');
     }
 
     final deviceId = await widget.deviceIdentity.load();
@@ -217,30 +212,6 @@ final class _CurioAppState extends State<CurioApp> {
       final state = await widget.notifications.requestPermissions();
       setState(() => _permissionState = state);
       _log('permissões: ${state.label}');
-    });
-  }
-
-  Future<void> _cancelLast() async {
-    final last = _lastSchedule;
-    if (last == null) {
-      _log('nada para cancelar ainda');
-      return;
-    }
-
-    await _runAction(() async {
-      await widget.notifications.cancel(last.record.id);
-      final snapshot = _snapshot;
-      if (snapshot != null) {
-        await _saveSnapshot(
-          snapshot.copyWith(
-            scheduledNotifications: snapshot.scheduledNotifications
-                .where((record) => record.id != last.record.id)
-                .toList(),
-          ),
-        );
-      }
-      _log('notificação cancelada');
-      await _refreshPendingCount();
     });
   }
 
@@ -347,10 +318,7 @@ final class _CurioAppState extends State<CurioApp> {
       }
 
       final scheduled = result;
-      setState(() {
-        _lastSchedule = scheduled;
-        _permissionState = scheduled.permissionState;
-      });
+      setState(() => _permissionState = scheduled.permissionState);
       await _saveSnapshot(
         snapshot.copyWith(
           scheduledNotifications: <ScheduledNotificationRecord>[
@@ -1201,18 +1169,6 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  String _notificationEventLabel(String? payload) {
-    if (payload == null || payload.isEmpty) {
-      return 'Notificação aberta';
-    }
-
-    if (payload.startsWith('$appUriScheme://reminder/')) {
-      return 'Lembrete aberto';
-    }
-
-    return 'Notificação aberta';
-  }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -1281,13 +1237,11 @@ final class _CurioAppState extends State<CurioApp> {
                     activity: _activity,
                     busy: _busy,
                     permissionState: _permissionState,
-                    lastSchedule: _lastSchedule,
-                    lastNotificationLabel: _lastNotificationLabel,
                     pendingCount: _pendingCount,
                     onRequestPermissions: _requestPermissions,
-                    onCancelLast: _cancelLast,
+                    onOpenNote: (date) => unawaited(_openDailyNote(date)),
                     onOpenNotification: (record) =>
-                        unawaited(_editNotification(record)),
+                        unawaited(_openNotificationTarget(record)),
                   ),
                   _AgendaView(
                     notes: _snapshot!.notes,
@@ -1840,11 +1794,9 @@ final class _TodayView extends StatelessWidget {
     required this.activity,
     required this.busy,
     required this.permissionState,
-    required this.lastSchedule,
-    required this.lastNotificationLabel,
     required this.pendingCount,
     required this.onRequestPermissions,
-    required this.onCancelLast,
+    required this.onOpenNote,
     required this.onOpenNotification,
   });
 
@@ -1853,15 +1805,15 @@ final class _TodayView extends StatelessWidget {
   final List<String> activity;
   final bool busy;
   final NotificationPermissionState permissionState;
-  final ScheduleResult? lastSchedule;
-  final String? lastNotificationLabel;
   final int pendingCount;
   final VoidCallback onRequestPermissions;
-  final VoidCallback onCancelLast;
+  final ValueChanged<DateTime> onOpenNote;
   final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
 
   @override
   Widget build(BuildContext context) {
+    final today = dateOnly(DateTime.now());
+
     return _PageFrame(
       title: 'Hoje',
       subtitle: todayLabel(),
@@ -1873,22 +1825,21 @@ final class _TodayView extends StatelessWidget {
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= 980;
           final children = <Widget>[
-            _FocusPanel(
+            _TodayDailyPanel(
               notes: notes,
               scheduledNotifications: scheduledNotifications,
+              selectedDate: today,
               activity: activity,
-              lastNotificationLabel: lastNotificationLabel,
+              onOpenNote: onOpenNote,
               onOpenNotification: onOpenNotification,
             ),
-            _NotificationPanel(
+            _UpcomingNotificationsPanel(
               notes: notes,
               scheduledNotifications: scheduledNotifications,
               busy: busy,
               permissionState: permissionState,
-              lastSchedule: lastSchedule,
               pendingCount: pendingCount,
               onRequestPermissions: onRequestPermissions,
-              onCancelLast: onCancelLast,
               onOpenNotification: onOpenNotification,
             ),
           ];
@@ -1917,68 +1868,96 @@ final class _TodayView extends StatelessWidget {
   }
 }
 
-final class _FocusPanel extends StatelessWidget {
-  const _FocusPanel({
+final class _TodayDailyPanel extends StatelessWidget {
+  const _TodayDailyPanel({
     required this.notes,
     required this.scheduledNotifications,
+    required this.selectedDate,
     required this.activity,
-    required this.lastNotificationLabel,
+    required this.onOpenNote,
     required this.onOpenNotification,
   });
 
   final List<NoteItem> notes;
   final List<ScheduledNotificationRecord> scheduledNotifications;
+  final DateTime selectedDate;
   final List<String> activity;
-  final String? lastNotificationLabel;
+  final ValueChanged<DateTime> onOpenNote;
   final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now().toUtc();
-    final visibleNotifications =
-        scheduledNotifications
-            .where((record) => record.scheduledForUtc.isAfter(now))
-            .toList()
-          ..sort(
-            (left, right) =>
-                left.scheduledForUtc.compareTo(right.scheduledForUtc),
-          );
+    final todaysNotes = dailyNotesForDate(notes, selectedDate);
+    final todaysNotifications = notificationsForDate(
+      scheduledNotifications,
+      selectedDate,
+    );
 
     return _Surface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           const _SectionHeader(
-            icon: Icons.bolt_outlined,
-            title: 'Próximas notificações',
+            icon: Icons.today_outlined,
+            title: 'Notas e notificações do dia',
+          ),
+          const SizedBox(height: 14),
+          Text(
+            formatLocalDate(selectedDate),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 18),
-          if (visibleNotifications.isEmpty)
+          _SectionHeader(
+            icon: Icons.article_outlined,
+            title: 'Notas do dia',
+            action: TextButton.icon(
+              onPressed: () => onOpenNote(selectedDate),
+              icon: const Icon(Icons.open_in_new_outlined),
+              label: const Text('Abrir em Notas'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (todaysNotes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                'Nenhuma nota do dia ainda.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            )
+          else
+            for (final note in todaysNotes)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.article_outlined),
+                title: Text(note.title),
+                subtitle: Text(
+                  note.body.trim().isEmpty
+                      ? formatLocalDateTime(note.updatedAtUtc)
+                      : note.body.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => onOpenNote(selectedDate),
+              ),
+          const Divider(height: 28),
+          const _SectionHeader(
+            icon: Icons.notifications_none_outlined,
+            title: 'Notificações do dia',
+          ),
+          const SizedBox(height: 8),
+          if (todaysNotifications.isEmpty)
             Text(
-              'Nenhuma notificação futura gravada.',
+              'Nenhuma notificação neste dia.',
               style: Theme.of(context).textTheme.bodySmall,
             )
           else
-            for (final record in visibleNotifications.take(8))
+            for (final record in todaysNotifications.take(8))
               _NotificationRecordTile(
                 record: record,
                 title: _notificationRecordTitle(record, notes),
                 onTap: () => onOpenNotification(record),
               ),
-          if (lastNotificationLabel != null) ...<Widget>[
-            const Divider(height: 28),
-            Text(
-              'Última notificação',
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            SelectableText(
-              lastNotificationLabel!,
-              style: const TextStyle(fontSize: 13),
-            ),
-          ],
           if (activity.isNotEmpty) ...<Widget>[
             const Divider(height: 28),
             const _SectionHeader(icon: Icons.history_outlined, title: 'Log'),
@@ -1995,16 +1974,14 @@ final class _FocusPanel extends StatelessWidget {
   }
 }
 
-final class _NotificationPanel extends StatelessWidget {
-  const _NotificationPanel({
+final class _UpcomingNotificationsPanel extends StatelessWidget {
+  const _UpcomingNotificationsPanel({
     required this.notes,
     required this.scheduledNotifications,
     required this.busy,
     required this.permissionState,
-    required this.lastSchedule,
     required this.pendingCount,
     required this.onRequestPermissions,
-    required this.onCancelLast,
     required this.onOpenNotification,
   });
 
@@ -2012,32 +1989,21 @@ final class _NotificationPanel extends StatelessWidget {
   final List<ScheduledNotificationRecord> scheduledNotifications;
   final bool busy;
   final NotificationPermissionState permissionState;
-  final ScheduleResult? lastSchedule;
   final int pendingCount;
   final VoidCallback onRequestPermissions;
-  final VoidCallback onCancelLast;
   final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
 
   @override
   Widget build(BuildContext context) {
-    final scheduled = lastSchedule;
-    final now = DateTime.now().toUtc();
-    final active =
-        scheduledNotifications
-            .where((record) => record.scheduledForUtc.isAfter(now))
-            .toList()
-          ..sort(
-            (left, right) =>
-                left.scheduledForUtc.compareTo(right.scheduledForUtc),
-          );
+    final upcoming = upcomingNotifications(scheduledNotifications);
 
     return _Surface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           _SectionHeader(
-            icon: Icons.notifications_none,
-            title: 'Notificações ativas',
+            icon: Icons.bolt_outlined,
+            title: 'Próximas notificações',
             action: _StatusPill(
               icon: Icons.notifications_active_outlined,
               label: '$pendingCount pendente(s)',
@@ -2058,14 +2024,9 @@ final class _NotificationPanel extends StatelessWidget {
                 icon: const Icon(Icons.verified_user_outlined),
                 label: const Text('Permissões'),
               ),
-              IconButton.filledTonal(
-                onPressed: busy || scheduled == null ? null : onCancelLast,
-                icon: const Icon(Icons.notifications_off_outlined),
-                tooltip: 'Cancelar último',
-              ),
             ],
           ),
-          if (active.isEmpty) ...<Widget>[
+          if (upcoming.isEmpty) ...<Widget>[
             const SizedBox(height: 18),
             Text(
               'Nenhuma notificação futura gravada.',
@@ -2073,7 +2034,7 @@ final class _NotificationPanel extends StatelessWidget {
             ),
           ] else ...<Widget>[
             const Divider(height: 28),
-            for (final record in active.take(10))
+            for (final record in upcoming.take(10))
               _NotificationRecordTile(
                 record: record,
                 title: _notificationRecordTitle(record, notes),
