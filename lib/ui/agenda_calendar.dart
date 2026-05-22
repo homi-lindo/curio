@@ -33,6 +33,8 @@ final class AgendaCalendar extends StatelessWidget {
     final leadingBlanks = DateTime(selected.year, selected.month).weekday - 1;
     final totalCells = leadingBlanks + dayCount;
     final navigate = onVisibleDateChanged ?? onDateSelected;
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final dayExtent = 58 + ((textScale - 1) * 30).clamp(0, 42).toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,11 +115,11 @@ final class AgendaCalendar extends StatelessWidget {
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 7,
             mainAxisSpacing: 4,
             crossAxisSpacing: 4,
-            mainAxisExtent: 58,
+            mainAxisExtent: dayExtent,
           ),
           itemCount: totalCells,
           itemBuilder: (context, index) {

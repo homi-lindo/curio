@@ -25,6 +25,7 @@ import 'services/sync_settings_validator.dart';
 import 'sync/http_sync_adapter.dart';
 import 'ui/agenda_calendar.dart';
 import 'ui/task_view_helpers.dart';
+import 'ui/zoomed_page.dart';
 
 Future<void> main() async {
   LumeWidgetsBinding.ensureInitialized();
@@ -830,7 +831,7 @@ final class _CurioAppState extends State<CurioApp> {
   }
 
   void _setUiZoom(double value) {
-    setState(() => _uiZoom = _clampZoom(value));
+    setState(() => _uiZoom = clampPageZoom(value));
   }
 
   void _selectNote(String noteId) {
@@ -1491,14 +1492,6 @@ bool _isTaskRecord(ScheduledNotificationRecord record, String taskId) {
   return record.ownerType == ReminderOwnerType.task && record.ownerId == taskId;
 }
 
-double _clampZoom(double value) {
-  return value.clamp(0.2, 2.0).toDouble();
-}
-
-String _zoomLabel(double value) {
-  return '${(_clampZoom(value) * 100).round()}%';
-}
-
 AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
   return snapshot.copyWith(
     deletedRecords: <DeletedRecord>[
@@ -1526,46 +1519,6 @@ final class _BootScreen extends StatelessWidget {
   }
 }
 
-final class _ZoomedPage extends StatelessWidget {
-  const _ZoomedPage({required this.scale, required this.child});
-
-  final double scale;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveScale = _clampZoom(scale);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (!constraints.maxWidth.isFinite || !constraints.maxHeight.isFinite) {
-          return Transform.scale(
-            scale: effectiveScale,
-            alignment: Alignment.topLeft,
-            child: child,
-          );
-        }
-
-        return ClipRect(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SingleChildScrollView(
-              child: Transform.scale(
-                scale: effectiveScale,
-                alignment: Alignment.topLeft,
-                child: SizedBox(
-                  width: max(320, constraints.maxWidth / effectiveScale),
-                  height: max(480, constraints.maxHeight / effectiveScale),
-                  child: child,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
 final class _ZoomRailControl extends StatelessWidget {
   const _ZoomRailControl({required this.zoom, required this.onZoomChanged});
 
@@ -1583,7 +1536,7 @@ final class _ZoomRailControl extends StatelessWidget {
           tooltip: 'Aumentar zoom',
         ),
         Text(
-          _zoomLabel(zoom),
+          pageZoomLabel(zoom),
           style: Theme.of(
             context,
           ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
@@ -1626,18 +1579,18 @@ final class _ZoomBottomBar extends StatelessWidget {
               ),
               Expanded(
                 child: Slider(
-                  value: _clampZoom(zoom),
-                  min: 0.2,
-                  max: 2,
+                  value: clampPageZoom(zoom),
+                  min: minPageZoom,
+                  max: maxPageZoom,
                   divisions: 18,
-                  label: _zoomLabel(zoom),
+                  label: pageZoomLabel(zoom),
                   onChanged: onZoomChanged,
                 ),
               ),
               SizedBox(
                 width: 48,
                 child: Text(
-                  _zoomLabel(zoom),
+                  pageZoomLabel(zoom),
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w800,
@@ -1722,7 +1675,7 @@ final class _HomeShell extends StatelessWidget {
                 ),
                 const VerticalDivider(width: 1, color: Color(0xFFE1DCD2)),
                 Expanded(
-                  child: _ZoomedPage(scale: zoom, child: pages[selectedIndex]),
+                  child: ZoomedPage(scale: zoom, child: pages[selectedIndex]),
                 ),
               ],
             ),
@@ -1730,7 +1683,7 @@ final class _HomeShell extends StatelessWidget {
         }
 
         return Scaffold(
-          body: _ZoomedPage(scale: zoom, child: pages[selectedIndex]),
+          body: ZoomedPage(scale: zoom, child: pages[selectedIndex]),
           floatingActionButton: FloatingActionButton.small(
             onPressed: onOpenSearch,
             tooltip: 'Pesquisa global',
