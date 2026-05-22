@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'app_brand.dart';
 import 'services/action_error_describer.dart';
@@ -17,6 +19,7 @@ import 'services/device_identity.dart';
 import 'services/local_store.dart';
 import 'services/local_sync_sidecar.dart';
 import 'services/lume_widgets_binding.dart';
+import 'services/manual_backup_codec.dart';
 import 'services/note_edit_history_store.dart';
 import 'services/notification_service.dart';
 import 'services/notification_timezone_audit.dart';
@@ -72,6 +75,7 @@ final class _CurioAppState extends State<CurioApp> {
   final ActionErrorDescriber _errorDescriber = const ActionErrorDescriber();
   final SyncSettingsValidator _syncSettingsValidator =
       const SyncSettingsValidator();
+  final ManualBackupCodec _manualBackupCodec = const ManualBackupCodec();
 
   int _selectedIndex = 0;
   double _uiZoom = 1;
@@ -884,6 +888,237 @@ final class _CurioAppState extends State<CurioApp> {
     }
   }
 
+  Future<void> _copyManualBackup() async {
+    await _runAction(() async {
+      final snapshot = _snapshot;
+      if (snapshot == null) {
+        return;
+      }
+
+      final backup = _manualBackupCodec.encode(snapshot);
+      File? file;
+      try {
+        file = await _writeManualBackupFile(backup);
+      } on Object catch (error) {
+        _log('backup TXT não salvo: ${_errorDescriber.describe(error)}');
+      }
+      await Clipboard.setData(ClipboardData(text: backup));
+      _log(
+        file == null
+            ? 'backup TXT copiado: ${snapshot.notes.length} nota(s), '
+                  '${snapshot.scheduledNotifications.length} notificação(ões)'
+            : 'backup TXT salvo e copiado: ${file.path}',
+      );
+      if (file != null) {
+        _log(
+          'backup inclui ${snapshot.notes.length} nota(s), '
+          '${snapshot.scheduledNotifications.length} notificação(ões)',
+        );
+      }
+    });
+  }
+
+  Future<File> _writeManualBackupFile(String backup) async {
+    final directory = await _manualBackupDirectory();
+    final timestamp = _backupFileTimestamp(DateTime.now());
+    final file = File(
+      '${directory.path}${Platform.pathSeparator}curio-backup-$timestamp.txt',
+    );
+    await file.writeAsString(backup, flush: true);
+    return file;
+  }
+
+  Future<Directory> _manualBackupDirectory() async {
+    try {
+      final downloads = await getDownloadsDirectory();
+      if (downloads != null) {
+        return downloads;
+      }
+    } on Object {
+      // Android may not expose a public Downloads directory through path_provider.
+    }
+    return getApplicationDocumentsDirectory();
+  }
+
+  Future<void> _showRestoreBackupDialog() async {
+    final controller = TextEditingController();
+    try {
+      final clipboard = await Clipboard.getData('text/plain');
+      controller.text = clipboard?.text ?? '';
+      controller.selection = TextSelection.collapsed(
+        offset: controller.text.length,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      final backupText = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Restaurar backup TXT'),
+            content: SizedBox(
+              width: 620,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Cole o TXT gerado pelo Curió. A restauração substitui '
+                    'as notas e notificações locais e reagenda alertas futuros.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: controller,
+                    autofocus: controller.text.trim().isEmpty,
+                    minLines: 12,
+                    maxLines: 18,
+                    keyboardType: TextInputType.multiline,
+                    decoration: const InputDecoration(
+                      alignLabelWithHint: true,
+                      labelText: 'Backup TXT',
+                      hintText: 'Curió Backup TXT...',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(controller.text),
+                child: const Text('Restaurar'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (backupText == null || backupText.trim().isEmpty) {
+        return;
+      }
+
+      final restored = _manualBackupCodec.decode(backupText);
+      await _restoreManualBackup(restored);
+    } on ManualBackupException catch (error) {
+      _log('backup não restaurado: ${error.message}');
+    } on Object catch (error) {
+      _log('backup não restaurado: ${_errorDescriber.describe(error)}');
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _restoreManualBackup(AppSnapshot backupSnapshot) async {
+    await _runAction(() async {
+      final current = _snapshot;
+      if (current == null) {
+        return;
+      }
+
+      final nowUtc = DateTime.now().toUtc();
+      final futureRecords = backupSnapshot.scheduledNotifications
+          .where((record) => record.scheduledForUtc.toUtc().isAfter(nowUtc))
+          .toList();
+      if (futureRecords.isNotEmpty) {
+        final authorized = await _ensureNotificationCreationAuthorization();
+        if (!authorized) {
+          _log('backup não restaurado: autorização de notificação pendente');
+          return;
+        }
+      }
+
+      final rescheduled = <ScheduledNotificationRecord>[];
+      for (final record in futureRecords) {
+        final intent = ReminderIntent.oneShot(
+          id: record.reminderIntentId,
+          ownerId: record.ownerId,
+          ownerType: record.ownerType,
+          instantUtc: record.scheduledForUtc,
+          updatedAtUtc: nowUtc,
+          timeZone: widget.notifications.localTimeZoneId,
+        );
+        try {
+          final result = await widget.notifications.scheduleReminder(
+            intent: intent,
+            deviceId: _deviceId,
+            title: record.title.trim().isEmpty
+                ? 'Notificação'
+                : record.title.trim(),
+            body: record.body.trim(),
+          );
+          if (result != null) {
+            rescheduled.add(result.record);
+            if (mounted) {
+              setState(() => _permissionState = result.permissionState);
+            } else {
+              _permissionState = result.permissionState;
+            }
+          } else {
+            for (final scheduled in rescheduled) {
+              await widget.notifications.cancel(scheduled.id);
+            }
+            _log('backup não restaurado: notificação sem próxima ocorrência');
+            return;
+          }
+        } on Object catch (error) {
+          for (final scheduled in rescheduled) {
+            await widget.notifications.cancel(scheduled.id);
+          }
+          _log(
+            'backup não restaurado: notificação não agendada '
+            '(${_errorDescriber.describe(error)})',
+          );
+          return;
+        }
+      }
+
+      for (final record in current.scheduledNotifications) {
+        try {
+          await widget.notifications.cancel(record.id);
+        } on Object catch (error) {
+          _log(
+            'notificação antiga não cancelada: '
+            '${_errorDescriber.describe(error)}',
+          );
+        }
+      }
+
+      final futureIds = futureRecords.map((record) => record.id).toSet();
+      final retainedRecords = backupSnapshot.scheduledNotifications
+          .where((record) => !futureIds.contains(record.id))
+          .toList();
+      final next = backupSnapshot.copyWith(
+        scheduledNotifications: <ScheduledNotificationRecord>[
+          ...rescheduled,
+          ...retainedRecords,
+        ],
+      );
+
+      await _saveSnapshot(next);
+      _syncSelectionAfterSnapshot(next);
+      if (mounted) {
+        setState(() {
+          _notificationComposerOpen = false;
+          _selectedIndex = 4;
+        });
+      } else {
+        _notificationComposerOpen = false;
+        _selectedIndex = 4;
+      }
+      await _refreshPendingCount();
+      _log(
+        'backup TXT restaurado: ${next.notes.length} nota(s), '
+        '${next.scheduledNotifications.length} notificação(ões)',
+      );
+    });
+  }
+
   Future<void> _runSync() async {
     await _runAction(() async {
       final snapshot = _snapshot;
@@ -1385,6 +1620,9 @@ final class _CurioAppState extends State<CurioApp> {
                     onSave: _saveSyncSettings,
                     onAppearanceChanged: _saveAppearanceSettings,
                     onSync: _runSync,
+                    onCopyBackup: () => unawaited(_copyManualBackup()),
+                    onRestoreBackup: () =>
+                        unawaited(_showRestoreBackupDialog()),
                     onStartSidecar: _startSyncSidecar,
                     onStopSidecar: _stopSyncSidecar,
                   ),
@@ -1476,6 +1714,16 @@ String _revisionPreview(String body) {
     return 'vazio';
   }
   return compact.length <= 96 ? compact : '${compact.substring(0, 96)}...';
+}
+
+String _backupFileTimestamp(DateTime value) {
+  final local = value.toLocal();
+  return '${local.year}'
+      '${local.month.toString().padLeft(2, '0')}'
+      '${local.day.toString().padLeft(2, '0')}-'
+      '${local.hour.toString().padLeft(2, '0')}'
+      '${local.minute.toString().padLeft(2, '0')}'
+      '${local.second.toString().padLeft(2, '0')}';
 }
 
 AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
@@ -3007,6 +3255,8 @@ final class _SyncView extends StatelessWidget {
     required this.onSave,
     required this.onAppearanceChanged,
     required this.onSync,
+    required this.onCopyBackup,
+    required this.onRestoreBackup,
     required this.onStartSidecar,
     required this.onStopSidecar,
   });
@@ -3024,6 +3274,8 @@ final class _SyncView extends StatelessWidget {
   final VoidCallback onSave;
   final ValueChanged<AppearanceSettings> onAppearanceChanged;
   final VoidCallback onSync;
+  final VoidCallback onCopyBackup;
+  final VoidCallback onRestoreBackup;
   final VoidCallback onStartSidecar;
   final VoidCallback onStopSidecar;
 
@@ -3100,6 +3352,50 @@ final class _SyncView extends StatelessWidget {
                       label: const Text('Salvar sync'),
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _Surface(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const _SectionHeader(
+                  icon: Icons.backup_outlined,
+                  title: 'Backup manual TXT',
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Gera um TXT legível por dia, com bloco de restauração '
+                  'para notas e notificações.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: <Widget>[
+                    FilledButton.icon(
+                      onPressed: busy ? null : onCopyBackup,
+                      icon: const Icon(Icons.copy_all_outlined),
+                      label: const Text('Copiar TXT'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: busy ? null : onRestoreBackup,
+                      icon: const Icon(Icons.restore_page_outlined),
+                      label: const Text('Restaurar TXT'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _MetricLine(
+                  'Notas incluídas',
+                  snapshot.notes.length.toString(),
+                ),
+                _MetricLine(
+                  'Notificações incluídas',
+                  snapshot.scheduledNotifications.length.toString(),
                 ),
               ],
             ),
