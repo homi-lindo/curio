@@ -199,3 +199,14 @@ Se a rejeição insistir que o app não é calendário/alarme, manter
 `SCHEDULE_EXACT_ALARM` e não migrar para `USE_EXACT_ALARM`. A alternativa é
 degradar notificações para agendamento aproximado, mas isso reduz a precisão do
 recurso principal.
+
+## Referências oficiais
+
+Verificado em 22/05/2026:
+
+- Política do Google Play sobre permissões e APIs sensíveis:
+  https://support.google.com/googleplay/android-developer/answer/16558241
+- Mudança do Android 14 para alarmes exatos:
+  https://developer.android.com/about/versions/14/changes/schedule-exact-alarms
+- Guia Android para agendar alarmes:
+  https://developer.android.com/develop/background-work/services/alarms
