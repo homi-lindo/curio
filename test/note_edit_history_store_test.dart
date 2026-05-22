@@ -34,4 +34,26 @@ void main() {
       expect(same.first.body, 'corpo 54');
     },
   );
+
+  test('note edit history stores non-restorable notification logs', () async {
+    final temp = await Directory.systemTemp.createTemp('curio_history_test_');
+    final store = NoteEditHistoryStore(directoryProvider: () async => temp);
+    addTearDown(() async => temp.delete(recursive: true));
+
+    await store.add(
+      NoteEditRevision(
+        id: 'notification-log',
+        noteId: 'note-1',
+        noteTitle: 'Notificação · Café',
+        body: 'Notificação editada',
+        savedAtUtc: DateTime.utc(2026, 5, 22, 16),
+        kind: NoteEditRevisionKind.notification,
+      ),
+    );
+
+    final loaded = await store.load();
+
+    expect(loaded.single.kind, NoteEditRevisionKind.notification);
+    expect(loaded.single.restorable, isFalse);
+  });
 }

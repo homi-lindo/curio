@@ -13,6 +13,7 @@ final class NoteEditRevision {
     required this.noteTitle,
     required this.body,
     required this.savedAtUtc,
+    this.kind = NoteEditRevisionKind.note,
   });
 
   factory NoteEditRevision.fromJson(Map<String, Object?> json) {
@@ -22,6 +23,9 @@ final class NoteEditRevision {
       noteTitle: json['noteTitle'] as String? ?? 'Nota',
       body: json['body'] as String? ?? '',
       savedAtUtc: DateTime.parse(json['savedAtUtc'] as String).toUtc(),
+      kind: NoteEditRevisionKind.values.byName(
+        json['kind'] as String? ?? NoteEditRevisionKind.note.name,
+      ),
     );
   }
 
@@ -30,6 +34,9 @@ final class NoteEditRevision {
   final String noteTitle;
   final String body;
   final DateTime savedAtUtc;
+  final NoteEditRevisionKind kind;
+
+  bool get restorable => kind == NoteEditRevisionKind.note;
 
   Map<String, Object?> toJson() {
     return <String, Object?>{
@@ -38,9 +45,12 @@ final class NoteEditRevision {
       'noteTitle': noteTitle,
       'body': body,
       'savedAtUtc': savedAtUtc.toUtc().toIso8601String(),
+      'kind': kind.name,
     };
   }
 }
+
+enum NoteEditRevisionKind { note, notification }
 
 final class NoteEditHistoryStore {
   NoteEditHistoryStore({Future<Directory> Function()? directoryProvider})

@@ -67,6 +67,8 @@ void main() {
       occurrenceKey: '2026-05-20T15:00:00.000Z',
       scheduledForUtc: DateTime.utc(2026, 5, 20, 15),
       payload: 'lume://reminder/task-task-1-due?owner=task-1',
+      title: 'Título editável',
+      body: 'Mensagem editável',
       scheduledTimeZone: 'America/Sao_Paulo',
     );
 
@@ -74,6 +76,8 @@ void main() {
 
     expect(loaded.ownerId, 'task-1');
     expect(loaded.ownerType, ReminderOwnerType.task);
+    expect(loaded.title, 'Título editável');
+    expect(loaded.body, 'Mensagem editável');
     expect(loaded.scheduledTimeZone, 'America/Sao_Paulo');
   });
 

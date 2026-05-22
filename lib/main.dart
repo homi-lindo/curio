@@ -287,6 +287,11 @@ final class _CurioAppState extends State<CurioApp> {
       }
       final next = await _withoutNotificationRecord(snapshot, record);
       await _saveSnapshot(next);
+      await _recordNotificationRevision(
+        record: record,
+        note: _noteForNotification(record),
+        action: 'cancelada',
+      );
       _log('notificação removida');
       await _refreshPendingCount();
     });
@@ -357,6 +362,11 @@ final class _CurioAppState extends State<CurioApp> {
           ],
         ),
       );
+      await _recordNotificationRevision(
+        record: scheduled.record,
+        note: note,
+        action: existing == null ? 'criada' : 'editada',
+      );
       _log(
         '${existing == null ? 'notificação criada' : 'notificação atualizada'}: '
         '${formatLocal(scheduled.plan.scheduledLocal)}',
@@ -382,6 +392,49 @@ final class _CurioAppState extends State<CurioApp> {
           .where((candidate) => candidate.id != record.id)
           .toList(),
     );
+  }
+
+  NoteItem? _noteForNotification(ScheduledNotificationRecord record) {
+    return _snapshot?.notes
+        .where((candidate) => candidate.id == record.ownerId)
+        .firstOrNull;
+  }
+
+  Future<void> _recordNotificationRevision({
+    required ScheduledNotificationRecord record,
+    required NoteItem? note,
+    required String action,
+  }) async {
+    final savedAtUtc = DateTime.now().toUtc();
+    final title = _notificationRecordTitle(
+      record,
+      note == null ? const <NoteItem>[] : <NoteItem>[note],
+    );
+    final body = <String>[
+      'Notificação $action',
+      'Título: $title',
+      'Quando: ${formatLocalDateTime(record.scheduledForUtc)}',
+      if (record.body.trim().isNotEmpty) 'Mensagem: ${record.body.trim()}',
+    ].join('\n');
+    final revision = NoteEditRevision(
+      id: _newId('revision'),
+      noteId: note?.id ?? record.ownerId,
+      noteTitle: 'Notificação · $title',
+      body: body,
+      savedAtUtc: savedAtUtc,
+      kind: NoteEditRevisionKind.notification,
+    );
+
+    try {
+      final next = await widget.noteHistory.add(revision);
+      if (mounted) {
+        setState(() => _noteHistory = next);
+      } else {
+        _noteHistory = next;
+      }
+    } on Object catch (error) {
+      _log('log de notificação não salvo: ${_errorDescriber.describe(error)}');
+    }
   }
 
   Future<void> _addNote() async {
@@ -970,13 +1023,12 @@ final class _CurioAppState extends State<CurioApp> {
     ScheduledNotificationRecord? record,
     DateTime? initialLocal,
   }) async {
-    final titleController = TextEditingController(
-      text: record?.title.isNotEmpty == true
-          ? record!.title
-          : note == null
-          ? ''
-          : _notificationTitleFromNote(note),
-    );
+    final initialTitle = record?.title.trim().isNotEmpty == true
+        ? record!.title.trim()
+        : note == null
+        ? 'Notificação'
+        : _notificationTitleFromNote(note);
+    final titleController = TextEditingController(text: initialTitle);
     final bodyController = TextEditingController(
       text: record?.body.isNotEmpty == true
           ? record!.body
@@ -2617,15 +2669,22 @@ final class _NotificationList extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.alarm_on_outlined),
               title: Text(_notificationRecordTitle(record, notes)),
-              subtitle: Text(formatLocalDateTime(record.scheduledForUtc)),
-              trailing: Wrap(
-                spacing: 4,
+              subtitle: Text(
+                record.body.trim().isEmpty
+                    ? formatLocalDateTime(record.scheduledForUtc)
+                    : '${formatLocalDateTime(record.scheduledForUtc)}\n${record.body.trim()}',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  IconButton(
+                  TextButton.icon(
                     onPressed: () => onEdit(record),
                     icon: const Icon(Icons.edit_outlined),
-                    tooltip: 'Editar notificação',
+                    label: const Text('Editar'),
                   ),
+                  const SizedBox(width: 4),
                   IconButton(
                     onPressed: () => onCancel(record),
                     icon: const Icon(Icons.notifications_off_outlined),
@@ -2658,14 +2717,18 @@ final class _RevisionList extends StatelessWidget {
         const SizedBox(height: 10),
         if (revisions.isEmpty)
           Text(
-            'As versões anteriores aparecerão aqui enquanto você escreve.',
+            'Edições de nota e notificações aparecerão aqui automaticamente.',
             style: Theme.of(context).textTheme.bodySmall,
           )
         else
           for (final revision in revisions.take(50))
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.history_outlined),
+              leading: Icon(
+                revision.kind == NoteEditRevisionKind.notification
+                    ? Icons.notifications_none_outlined
+                    : Icons.history_outlined,
+              ),
               title: Text(revision.noteTitle),
               subtitle: Text(
                 '${formatLocalDateTime(revision.savedAtUtc)} · '
@@ -2673,11 +2736,16 @@ final class _RevisionList extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              trailing: TextButton.icon(
-                onPressed: () => onRestore(revision),
-                icon: const Icon(Icons.restore_outlined),
-                label: const Text('Restaurar'),
-              ),
+              trailing: revision.restorable
+                  ? TextButton.icon(
+                      onPressed: () => onRestore(revision),
+                      icon: const Icon(Icons.restore_outlined),
+                      label: const Text('Restaurar'),
+                    )
+                  : const _StatusPill(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'Log',
+                    ),
             ),
       ],
     );
