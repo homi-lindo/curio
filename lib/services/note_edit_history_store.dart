@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'recoverable_store_file.dart';
+
 const int noteEditHistoryLimit = 50;
 
 final class NoteEditRevision {
@@ -78,16 +80,24 @@ final class NoteEditHistoryStore {
       return const <NoteEditRevision>[];
     }
 
-    final payload = jsonDecode(raw) as Map<String, Object?>;
-    final items = payload['revisions'] as List<Object?>? ?? const <Object?>[];
-    return items
-        .map(
-          (item) => NoteEditRevision.fromJson(
-            Map<String, Object?>.from(item! as Map<dynamic, dynamic>),
-          ),
-        )
-        .take(noteEditHistoryLimit)
-        .toList();
+    try {
+      final payload = jsonDecode(raw) as Map<String, Object?>;
+      final items = payload['revisions'] as List<Object?>? ?? const <Object?>[];
+      return items
+          .map(
+            (item) => NoteEditRevision.fromJson(
+              Map<String, Object?>.from(item! as Map<dynamic, dynamic>),
+            ),
+          )
+          .take(noteEditHistoryLimit)
+          .toList();
+    } on Object catch (error) {
+      if (!isRecoverableStoreFormatError(error)) {
+        rethrow;
+      }
+      await preserveInvalidStoreFile(target);
+      return const <NoteEditRevision>[];
+    }
   }
 
   Future<List<NoteEditRevision>> add(NoteEditRevision revision) async {

@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../data/app_database.dart';
+import 'recoverable_store_file.dart';
 
 final class LocalStore {
   LocalStore({Future<Directory> Function()? directoryProvider})
@@ -75,8 +76,19 @@ final class LocalStore {
       return;
     }
 
-    final raw = await legacy.readAsString();
-    final json = jsonDecode(raw) as Map<String, Object?>;
-    await save(AppSnapshot.fromJson(json));
+    try {
+      final raw = await legacy.readAsString();
+      if (raw.trim().isEmpty) {
+        await preserveInvalidStoreFile(legacy);
+        return;
+      }
+      final json = jsonDecode(raw) as Map<String, Object?>;
+      await save(AppSnapshot.fromJson(json));
+    } on Object catch (error) {
+      if (!isRecoverableStoreFormatError(error)) {
+        rethrow;
+      }
+      await preserveInvalidStoreFile(legacy);
+    }
   }
 }

@@ -58,6 +58,31 @@ void main() {
     expect(rewritten, isNot(contains('legacy-secret')));
     expect(rewritten, isNot(contains('authToken')));
   });
+
+  test('invalid sync settings file falls back to secure token', () async {
+    final temp = await Directory.systemTemp.createTemp(
+      'lume_sync_settings_invalid_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final secrets = _MemorySecretBackend();
+    await secrets.write('syncToken', 'safe-token');
+    final store = SyncSettingsStore(
+      directoryProvider: () async => temp,
+      secureSecrets: SecureSecretStore(backend: secrets),
+    );
+    final settingsFile = await store.file;
+    await settingsFile.writeAsString('');
+
+    final loaded = await store.load();
+    final archived = temp.listSync().where(
+      (entity) => entity.path.contains('lume-sync.json.invalid-'),
+    );
+
+    expect(loaded.serverUrl, isEmpty);
+    expect(loaded.authToken, 'safe-token');
+    expect(archived, isNotEmpty);
+  });
 }
 
 final class _MemorySecretBackend implements SecretBackend {

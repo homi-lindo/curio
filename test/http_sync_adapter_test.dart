@@ -6,6 +6,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lume/sync/http_sync_adapter.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 
+final class _TrackingHttpClient implements HttpClient {
+  bool closeCalled = false;
+  bool forceArgument = true;
+
+  @override
+  void close({bool force = false}) {
+    closeCalled = true;
+    forceArgument = force;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   test('http sync adapter posts local snapshot and merges response', () async {
     final now = DateTime.utc(2026, 5, 20, 15);
@@ -97,6 +111,48 @@ void main() {
         reason: url,
       );
     }
+  });
+
+  test('dispose is idempotent — calling twice does not throw', () {
+    final adapter = HttpSyncAdapter(
+      serverUrl: Uri.parse('https://sync.example.test'),
+      authToken: 'shared-secret-012345',
+    );
+    adapter.dispose();
+    expect(() => adapter.dispose(), returnsNormally);
+  });
+
+  test('synchronize after dispose throws StateError', () async {
+    final adapter = HttpSyncAdapter(
+      serverUrl: Uri.parse('https://sync.example.test'),
+      authToken: 'shared-secret-012345',
+    );
+    adapter.dispose();
+    await expectLater(
+      adapter.synchronize(
+        snapshot: const AppSnapshot(
+          tasks: <TaskItem>[],
+          notes: <NoteItem>[],
+          scheduledNotifications: [],
+        ),
+        deviceId: 'lume-test',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('dispose calls close(force: false) on injected HttpClient', () {
+    final fakeClient = _TrackingHttpClient();
+    final adapter = HttpSyncAdapter(
+      serverUrl: Uri.parse('https://sync.example.test'),
+      authToken: 'shared-secret-012345',
+      client: fakeClient,
+    );
+
+    expect(fakeClient.closeCalled, isFalse);
+    adapter.dispose();
+    expect(fakeClient.closeCalled, isTrue);
+    expect(fakeClient.forceArgument, isFalse);
   });
 
   test('http sync adapter caps response body size', () async {

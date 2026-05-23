@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'recoverable_store_file.dart';
+
 final class DeviceIdentityStore {
   DeviceIdentityStore({
     Future<Directory> Function()? directoryProvider,
@@ -27,12 +29,21 @@ final class DeviceIdentityStore {
   Future<String> load() async {
     final identityFile = await file;
     if (await identityFile.exists()) {
-      final raw = await identityFile.readAsString();
-      final json = jsonDecode(raw) as Map<String, Object?>;
-      final deviceId = json['deviceId'] as String?;
-      if (deviceId != null && deviceId.isNotEmpty) {
-        return deviceId;
+      try {
+        final raw = await identityFile.readAsString();
+        if (raw.trim().isNotEmpty) {
+          final json = jsonDecode(raw) as Map<String, Object?>;
+          final deviceId = json['deviceId'] as String?;
+          if (deviceId != null && deviceId.isNotEmpty) {
+            return deviceId;
+          }
+        }
+      } on Object catch (error) {
+        if (!isRecoverableStoreFormatError(error)) {
+          rethrow;
+        }
       }
+      await preserveInvalidStoreFile(identityFile);
     }
 
     final deviceId = _idFactory();

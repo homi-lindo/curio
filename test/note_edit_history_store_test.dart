@@ -56,4 +56,23 @@ void main() {
     expect(loaded.single.kind, NoteEditRevisionKind.notification);
     expect(loaded.single.restorable, isFalse);
   });
+
+  test('invalid note edit history file falls back to empty history', () async {
+    final temp = await Directory.systemTemp.createTemp(
+      'curio_history_invalid_',
+    );
+    final store = NoteEditHistoryStore(directoryProvider: () async => temp);
+    addTearDown(() async => temp.delete(recursive: true));
+
+    final target = await store.file;
+    await target.writeAsString('{');
+
+    final loaded = await store.load();
+    final archived = temp.listSync().where(
+      (entity) => entity.path.contains('curio-note-history.json.invalid-'),
+    );
+
+    expect(loaded, isEmpty);
+    expect(archived, isNotEmpty);
+  });
 }

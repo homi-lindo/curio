@@ -98,4 +98,28 @@ void main() {
       expect(loaded.scheduledTimeZone, isEmpty);
     },
   );
+
+  test(
+    'invalid legacy json is archived and does not block sqlite startup',
+    () async {
+      final temp = await Directory.systemTemp.createTemp('lume_store_invalid_');
+
+      final store = LocalStore(directoryProvider: () async => temp);
+      addTearDown(() async {
+        await store.close();
+        await temp.delete(recursive: true);
+      });
+      final legacy = await store.legacyJsonFile;
+      await legacy.writeAsString('{');
+
+      final loaded = await store.load();
+      final archived = temp.listSync().where(
+        (entity) => entity.path.contains('lume-state.json.invalid-'),
+      );
+
+      expect(loaded.notes, isNotEmpty);
+      expect(await store.file.then((file) => file.exists()), isTrue);
+      expect(archived, isNotEmpty);
+    },
+  );
 }

@@ -6,30 +6,36 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../theme/curio_theme.dart';
+import 'recoverable_store_file.dart';
 
 final class AppearanceSettings {
   const AppearanceSettings({
     this.themeProfile = CurioThemeProfile.aurora,
     this.themeMode = ThemeMode.system,
+    this.pageZoom = 1.0,
   });
 
   factory AppearanceSettings.fromJson(Map<String, Object?> json) {
     return AppearanceSettings(
       themeProfile: _parseThemeProfile(json['themeProfile']),
       themeMode: _parseThemeMode(json['themeMode']),
+      pageZoom: _parsePageZoom(json['pageZoom']),
     );
   }
 
   final CurioThemeProfile themeProfile;
   final ThemeMode themeMode;
+  final double pageZoom;
 
   AppearanceSettings copyWith({
     CurioThemeProfile? themeProfile,
     ThemeMode? themeMode,
+    double? pageZoom,
   }) {
     return AppearanceSettings(
       themeProfile: themeProfile ?? this.themeProfile,
       themeMode: themeMode ?? this.themeMode,
+      pageZoom: pageZoom ?? this.pageZoom,
     );
   }
 
@@ -37,6 +43,7 @@ final class AppearanceSettings {
     return <String, Object?>{
       'themeProfile': themeProfile.name,
       'themeMode': themeMode.name,
+      'pageZoom': pageZoom,
     };
   }
 }
@@ -62,11 +69,24 @@ final class AppearanceSettingsStore {
       return const AppearanceSettings();
     }
 
-    final raw = await settingsFile.readAsString();
-    final json = Map<String, Object?>.from(
-      jsonDecode(raw) as Map<dynamic, dynamic>,
-    );
-    return AppearanceSettings.fromJson(json);
+    try {
+      final raw = await settingsFile.readAsString();
+      if (raw.trim().isEmpty) {
+        await preserveInvalidStoreFile(settingsFile);
+        return const AppearanceSettings();
+      }
+
+      final json = Map<String, Object?>.from(
+        jsonDecode(raw) as Map<dynamic, dynamic>,
+      );
+      return AppearanceSettings.fromJson(json);
+    } on Object catch (error) {
+      if (!isRecoverableStoreFormatError(error)) {
+        rethrow;
+      }
+      await preserveInvalidStoreFile(settingsFile);
+      return const AppearanceSettings();
+    }
   }
 
   Future<void> save(AppearanceSettings settings) async {
@@ -89,4 +109,12 @@ ThemeMode _parseThemeMode(Object? value) {
     (mode) => mode.name == name,
     orElse: () => ThemeMode.system,
   );
+}
+
+double _parsePageZoom(Object? value) {
+  if (value is num) {
+    final clamped = value.toDouble().clamp(0.2, 2.0);
+    return clamped;
+  }
+  return 1.0;
 }

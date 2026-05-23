@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'recoverable_store_file.dart';
 import 'secure_secret_store.dart';
 
 final class SyncSettings {
@@ -76,10 +77,26 @@ final class SyncSettingsStore {
       return SyncSettings(authToken: authToken);
     }
 
-    final raw = await settingsFile.readAsString();
-    final json = Map<String, Object?>.from(
-      jsonDecode(raw) as Map<dynamic, dynamic>,
-    );
+    Map<String, Object?> json;
+    try {
+      final raw = await settingsFile.readAsString();
+      if (raw.trim().isEmpty) {
+        await preserveInvalidStoreFile(settingsFile);
+        final authToken = await secureSecrets.readSyncToken();
+        return SyncSettings(authToken: authToken);
+      }
+
+      json = Map<String, Object?>.from(
+        jsonDecode(raw) as Map<dynamic, dynamic>,
+      );
+    } on Object catch (error) {
+      if (!isRecoverableStoreFormatError(error)) {
+        rethrow;
+      }
+      await preserveInvalidStoreFile(settingsFile);
+      final authToken = await secureSecrets.readSyncToken();
+      return SyncSettings(authToken: authToken);
+    }
     final settings = SyncSettings.fromJson(json);
     final secureToken = await secureSecrets.readSyncToken();
     final legacyToken = settings.authToken.trim();

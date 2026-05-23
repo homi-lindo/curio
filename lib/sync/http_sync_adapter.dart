@@ -40,12 +40,22 @@ final class HttpSyncAdapter implements SyncAdapter {
   final int maxResponseBytes;
   final HttpClient _client;
   final SnapshotSyncMerger _merger = const SnapshotSyncMerger();
+  bool _disposed = false;
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _client.close(force: false);
+  }
 
   @override
   Future<SyncResult> synchronize({
     required AppSnapshot snapshot,
     required String deviceId,
   }) async {
+    if (_disposed) {
+      throw StateError('HttpSyncAdapter has been disposed.');
+    }
     final started = DateTime.now().toUtc();
     final response = await _postJson(
       serverUrl.resolve('/sync'),
