@@ -71,16 +71,77 @@ try {
             Copy-Item -LiteralPath $_.FullName -Destination $packageDir -Recurse
         }
 
-    $readme = @"
-Curió portable build
+    # Copy notification helper scripts alongside curio.exe
+    $toolWindowsDir = $PSScriptRoot
+    $registerScript = Join-Path $toolWindowsDir 'Register-CurioShortcut.ps1'
+    if (Test-Path -LiteralPath $registerScript) {
+        Copy-Item -LiteralPath $registerScript -Destination $packageDir
+    } else {
+        Write-Warning "Register-CurioShortcut.ps1 not found at: $registerScript"
+    }
 
-Open curio.exe to test the app without installing an MSIX package.
+    # Generate Install-CurioPortable.ps1 inside the package
+    $installScript = @'
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    One-time setup: registers the Curio Portable Start Menu shortcut so that
+    Windows toast notifications work without an MSIX package.
+
+    Run once after unpacking: right-click this file and choose
+    "Run with PowerShell", or open PowerShell here and run:
+        .\Install-CurioPortable.ps1
+
+    To uninstall (remove the shortcut):
+        .\Install-CurioPortable.ps1 -Remove
+#>
+[CmdletBinding(SupportsShouldProcess)]
+param([switch]$Remove)
+
+$ErrorActionPreference = 'Stop'
+$scriptDir = $PSScriptRoot
+$exePath = Join-Path $scriptDir 'curio.exe'
+$registerScript = Join-Path $scriptDir 'Register-CurioShortcut.ps1'
+
+if (-not (Test-Path -LiteralPath $registerScript)) {
+    Write-Error "Register-CurioShortcut.ps1 not found next to this script. Cannot continue."
+    exit 1
+}
+
+if ($Remove) {
+    & $registerScript -ExePath $exePath -Remove
+} else {
+    & $registerScript -ExePath $exePath
+}
+'@
+    Set-Content -LiteralPath (Join-Path $packageDir 'Install-CurioPortable.ps1') -Value $installScript -Encoding UTF8
+
+    $readme = @"
+Curio portable build
+
+Open curio.exe to run the app without installing an MSIX package.
 
 Notes:
 - This build is for interface and functional smoke testing.
 - It intentionally excludes the MSIX package and does not register the app in Windows.
-- Windows desktop notifications can behave differently without MSIX registration.
 - Use the signed MSIX + WACK flow for final Store certification checks.
+
+Enabling Windows toast notifications (one-time setup)
+------------------------------------------------------
+Windows requires a registered Start Menu shortcut with a matching AppUserModel.ID
+for toast notifications to appear. The portable build does not auto-register, so
+notifications are suppressed until you run the one-time setup:
+
+  1. Open PowerShell in this folder and run:
+         .\Install-CurioPortable.ps1
+
+     Or right-click Install-CurioPortable.ps1 and choose "Run with PowerShell".
+
+  2. You should see a confirmation that the shortcut was created.
+     After this, notifications will fire normally.
+
+To uninstall (remove the Start Menu shortcut):
+    .\Install-CurioPortable.ps1 -Remove
 "@
     Set-Content -LiteralPath (Join-Path $packageDir 'README-portable.txt') -Value $readme -Encoding UTF8
 

@@ -61,7 +61,7 @@ try {
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net9.0-windows</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -78,14 +78,18 @@ try {
     Set-Content -LiteralPath (Join-Path $staging 'CurioPortableLauncher.csproj') -Value $project -Encoding UTF8
 
     $program = @"
+#nullable disable
 using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 const string AppId = @"$portableId";
 const string PayloadSha256 = @"$zipSha256";
+const string AumId = "App.Lume.Personal";
+const string ShortcutDisplayName = "Curio Portable";
 
 var target = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -119,6 +123,27 @@ try
         throw new FileNotFoundException("Curio executable was not extracted.", appExe);
     }
 
+    // Register Start Menu shortcut so toast notifications work in the portable build.
+    // Runs on every extraction (new version) or when the shortcut is missing.
+    var startMenuPrograms = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Microsoft", "Windows", "Start Menu", "Programs");
+    var shortcutPath = Path.Combine(startMenuPrograms, ShortcutDisplayName + ".lnk");
+    if (needsExtract || !File.Exists(shortcutPath))
+    {
+        try
+        {
+            ShortcutHelper.CreateWithAumid(appExe, target, shortcutPath, AumId);
+        }
+        catch (Exception shortcutError)
+        {
+            // Non-fatal: log but continue launching the app.
+            File.AppendAllText(
+                Path.Combine(target, "launcher-error.log"),
+                "[shortcut] " + shortcutError + Environment.NewLine);
+        }
+    }
+
     Process.Start(new ProcessStartInfo(appExe)
     {
         WorkingDirectory = target,
@@ -130,6 +155,113 @@ catch (Exception error)
     Directory.CreateDirectory(target);
     File.WriteAllText(Path.Combine(target, "launcher-error.log"), error.ToString());
     Environment.ExitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Shortcut + AUMID helper — no external NuGet deps, .NET 9 / win-x64 only.
+// ---------------------------------------------------------------------------
+static class ShortcutHelper
+{
+    // PKEY_AppUserModel_ID: {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, pid 5
+    private static readonly Guid PkeyAumidFmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+    private const uint PkeyAumidPid = 5;
+
+    public static void CreateWithAumid(string exePath, string workingDir, string shortcutPath, string aumid)
+    {
+        // Step 1: create .lnk via IShellLink COM
+        var shellLinkType = Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"));
+        dynamic shellLink = Activator.CreateInstance(shellLinkType);
+        try
+        {
+            shellLink.SetPath(exePath);
+            shellLink.SetWorkingDirectory(workingDir);
+            shellLink.SetDescription("Curio Portable");
+            var persistFile = (IPersistFile)shellLink;
+            Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath));
+            persistFile.Save(shortcutPath, true);
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(shellLink);
+        }
+
+        // Step 2: stamp AppUserModel.ID via IPropertyStore
+        var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        int hr = NativeMethods.SHGetPropertyStoreFromParsingName(
+            shortcutPath, IntPtr.Zero, 2 /* GPS_READWRITE */, ref iid, out IntPtr psPtr);
+        if (hr != 0 || psPtr == IntPtr.Zero) return;
+
+        try
+        {
+            var ps = (IPropertyStore)Marshal.GetObjectForIUnknown(psPtr);
+            var key = new PROPERTYKEY { fmtid = PkeyAumidFmtid, pid = PkeyAumidPid };
+            var pv = new PROPVARIANT();
+            pv.vt = 31; // VT_LPWSTR
+            pv.pwszVal = Marshal.StringToCoTaskMemUni(aumid);
+            try
+            {
+                ps.SetValue(ref key, ref pv);
+                ps.Commit();
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(pv.pwszVal);
+                Marshal.ReleaseComObject(ps);
+            }
+        }
+        finally
+        {
+            Marshal.Release(psPtr);
+        }
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStore
+    {
+        void GetCount(out uint cProps);
+        void GetAt(uint iProp, out PROPERTYKEY pkey);
+        void GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        void SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+        void Commit();
+    }
+
+    [ComImport, Guid("0000010B-0000-0000-C000-000000000046"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROPERTYKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct PROPVARIANT
+    {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pwszVal;
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int SHGetPropertyStoreFromParsingName(
+            [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+            IntPtr zeroWorks,
+            int flags,
+            ref Guid iid,
+            out IntPtr propertyStore);
+    }
 }
 "@
     Set-Content -LiteralPath (Join-Path $staging 'Program.cs') -Value $program -Encoding UTF8
