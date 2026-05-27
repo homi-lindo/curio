@@ -124,24 +124,21 @@ try
     }
 
     // Register Start Menu shortcut so toast notifications work in the portable build.
-    // Runs on every extraction (new version) or when the shortcut is missing.
+    // Runs on every launch so a newer portable launcher can repair older shortcuts.
     var startMenuPrograms = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Microsoft", "Windows", "Start Menu", "Programs");
     var shortcutPath = Path.Combine(startMenuPrograms, ShortcutDisplayName + ".lnk");
-    if (needsExtract || !File.Exists(shortcutPath))
+    try
     {
-        try
-        {
-            ShortcutHelper.CreateWithAumid(appExe, target, shortcutPath, AumId);
-        }
-        catch (Exception shortcutError)
-        {
-            // Non-fatal: log but continue launching the app.
-            File.AppendAllText(
-                Path.Combine(target, "launcher-error.log"),
-                "[shortcut] " + shortcutError + Environment.NewLine);
-        }
+        ShortcutHelper.CreateWithAumid(appExe, target, shortcutPath, AumId);
+    }
+    catch (Exception shortcutError)
+    {
+        // Non-fatal: log but continue launching the app.
+        File.AppendAllText(
+            Path.Combine(target, "launcher-error.log"),
+            "[shortcut] " + shortcutError + Environment.NewLine);
     }
 
     Process.Start(new ProcessStartInfo(appExe)
@@ -168,21 +165,40 @@ static class ShortcutHelper
 
     public static void CreateWithAumid(string exePath, string workingDir, string shortcutPath, string aumid)
     {
-        // Step 1: create .lnk via IShellLink COM
+        // Step 1: create .lnk via IShellLink and stamp the AUMID before
+        // saving it. Stamping an already-saved .lnk through
+        // SHGetPropertyStoreFromParsingName is not reliable for this property.
         var shellLinkType = Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"));
-        dynamic shellLink = Activator.CreateInstance(shellLinkType);
+        object shellLink = Activator.CreateInstance(shellLinkType);
         try
         {
-            shellLink.SetPath(exePath);
-            shellLink.SetWorkingDirectory(workingDir);
-            shellLink.SetDescription("Curio Portable");
-            var persistFile = (IPersistFile)shellLink;
             Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath));
+            var link = (IShellLinkW)shellLink;
+            link.SetPath(exePath);
+            link.SetWorkingDirectory(workingDir);
+            link.SetDescription("Curio Portable");
+
+            var propertyStore = (IPropertyStore)shellLink;
+            var key = new PROPERTYKEY { fmtid = PkeyAumidFmtid, pid = PkeyAumidPid };
+            var pv = new PROPVARIANT();
+            pv.vt = 31; // VT_LPWSTR
+            pv.pwszVal = Marshal.StringToCoTaskMemUni(aumid);
+            try
+            {
+                propertyStore.SetValue(ref key, ref pv);
+                propertyStore.Commit();
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(pv.pwszVal);
+            }
+
+            var persistFile = (IPersistFile)shellLink;
             persistFile.Save(shortcutPath, true);
         }
         finally
         {
-            Marshal.ReleaseComObject(shellLink);
+            Marshal.FinalReleaseComObject(shellLink);
         }
 
         // Step 2: stamp AppUserModel.ID via IPropertyStore
@@ -224,6 +240,43 @@ static class ShortcutHelper
         void GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
         void SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
         void Commit();
+    }
+
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellLinkW
+    {
+        void GetPath(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszFile,
+            int cchMaxPath,
+            IntPtr pfd,
+            uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszName,
+            int cchMaxName);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszDir,
+            int cchMaxPath);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszArgs,
+            int cchMaxPath);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszIconPath,
+            int cchIconPath,
+            out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
     }
 
     [ComImport, Guid("0000010B-0000-0000-C000-000000000046"),

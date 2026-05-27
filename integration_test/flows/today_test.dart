@@ -117,6 +117,12 @@ void todayTests() {
           pending.map((request) => request.title),
           contains(originalTitle),
         );
+      } else if (Platform.isWindows) {
+        final pending = await harness.notifications.pending();
+        expect(
+          pending.map((request) => request.id),
+          contains(createdSnapshot.scheduledNotifications.single.id),
+        );
       }
       expect(find.text(originalTitle), findsWidgets);
 
@@ -162,6 +168,12 @@ void todayTests() {
           pending.map((request) => request.title),
           isNot(contains(originalTitle)),
         );
+      } else if (Platform.isWindows) {
+        final pending = await harness.notifications.pending();
+        expect(
+          pending.map((request) => request.id),
+          contains(editedSnapshot.scheduledNotifications.single.id),
+        );
       }
       expect(find.text(editedTitle), findsWidgets);
 
@@ -178,6 +190,10 @@ void todayTests() {
           pending.map((request) => request.title),
           isNot(contains(editedTitle)),
         );
+      } else if (Platform.isWindows) {
+        final pending = await harness.notifications.pending();
+        final editedId = editedSnapshot.scheduledNotifications.single.id;
+        expect(pending.map((request) => request.id), isNot(contains(editedId)));
       }
       expect(tester.takeException(), isNull);
     });

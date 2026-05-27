@@ -20,6 +20,23 @@ Anote antes de testar:
 
 ## Windows
 
+Smoke automatico local:
+
+```powershell
+& '..\..\.tools\flutter\bin\flutter.bat' run -d windows -t tool\windows\smoke_windows_notifications.dart --no-pub
+```
+
+Resultado esperado no terminal:
+
+```text
+SMOKE_WINDOWS_NOTIFICATION_OK
+```
+
+Esse smoke dispara uma toast imediata, agenda uma notificacao futura, confirma
+que ela entrou na fila nativa do Windows e cancela antes da entrega.
+
+Smoke manual de interface:
+
 1. Abra o `curio-windows-test.exe`.
 2. Em `Hoje`, clique em `Nova notificacao`.
 3. Crie uma notificacao para daqui a 2 minutos:
