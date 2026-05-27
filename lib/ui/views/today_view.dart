@@ -21,7 +21,8 @@ final class TodayView extends StatelessWidget {
     required this.pendingCount,
     required this.activeAlarm,
     required this.onRequestPermissions,
-    required this.onStopActiveAlarm,
+    required this.onSnoozeActiveAlarm,
+    required this.onCancelActiveAlarm,
     required this.onOpenNote,
     required this.onOpenNotification,
     required this.onCreateStandaloneNotification,
@@ -35,7 +36,8 @@ final class TodayView extends StatelessWidget {
   final int pendingCount;
   final ScheduledNotificationRecord? activeAlarm;
   final VoidCallback onRequestPermissions;
-  final VoidCallback onStopActiveAlarm;
+  final VoidCallback onSnoozeActiveAlarm;
+  final VoidCallback onCancelActiveAlarm;
   final ValueChanged<DateTime> onOpenNote;
   final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
   final VoidCallback onCreateStandaloneNotification;
@@ -59,7 +61,8 @@ final class TodayView extends StatelessWidget {
               _ActiveAlarmPanel(
                 notes: notes,
                 record: activeAlarm!,
-                onStop: onStopActiveAlarm,
+                onSnooze: onSnoozeActiveAlarm,
+                onCancel: onCancelActiveAlarm,
                 onOpen: () => onOpenNotification(activeAlarm!),
               ),
             _TodayDailyPanel(
@@ -122,13 +125,15 @@ final class _ActiveAlarmPanel extends StatelessWidget {
   const _ActiveAlarmPanel({
     required this.notes,
     required this.record,
-    required this.onStop,
+    required this.onSnooze,
+    required this.onCancel,
     required this.onOpen,
   });
 
   final List<NoteItem> notes;
   final ScheduledNotificationRecord record;
-  final VoidCallback onStop;
+  final VoidCallback onSnooze;
+  final VoidCallback onCancel;
   final VoidCallback onOpen;
 
   @override
@@ -139,27 +144,41 @@ final class _ActiveAlarmPanel extends StatelessWidget {
         children: <Widget>[
           SectionHeader(
             icon: Icons.alarm_on_outlined,
-            title: notificationRecordTitle(record, notes),
-            action: Wrap(
-              spacing: 10,
-              children: <Widget>[
-                FilledButton.icon(
-                  onPressed: onOpen,
-                  icon: const Icon(Icons.open_in_new_outlined),
-                  label: const Text('Abrir'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: onStop,
-                  icon: const Icon(Icons.stop_circle_outlined),
-                  label: const Text('Parar alarme'),
-                ),
-              ],
+            title: 'Alarme ativo',
+            action: IconButton(
+              onPressed: onOpen,
+              icon: const Icon(Icons.open_in_new_outlined),
+              tooltip: 'Abrir nota/notificação',
             ),
           ),
           const SizedBox(height: 8),
           Text(
+            notificationRecordTitle(record, notes),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
             formatLocalDateTime(record.scheduledForUtc),
             style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              FilledButton.icon(
+                onPressed: onSnooze,
+                icon: const Icon(Icons.snooze_outlined),
+                label: const Text('Adiar 5 min'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: onCancel,
+                icon: const Icon(Icons.alarm_off_outlined),
+                label: const Text('Cancelar'),
+              ),
+            ],
           ),
         ],
       ),

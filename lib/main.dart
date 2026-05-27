@@ -1566,9 +1566,13 @@ final class _CurioAppState extends State<CurioApp> {
 
   Future<void> _startLocalAlarm(ScheduledNotificationRecord record) async {
     if (mounted) {
-      setState(() => _activeAlarmRecord = record);
+      setState(() {
+        _activeAlarmRecord = record;
+        _selectedIndex = 0;
+      });
     } else {
       _activeAlarmRecord = record;
+      _selectedIndex = 0;
     }
 
     final result = await widget.alarmPlayback.start(
@@ -1589,6 +1593,81 @@ final class _CurioAppState extends State<CurioApp> {
       _activeAlarmRecord = null;
     }
     _log('alarme contínuo parado');
+  }
+
+  Future<void> _snoozeActiveAlarm() async {
+    final record = _activeAlarmRecord;
+    if (record == null) {
+      return;
+    }
+
+    await _runAction(() async {
+      final snapshot = _snapshot;
+      if (snapshot == null) {
+        return;
+      }
+
+      await widget.alarmPlayback.stop();
+      final scheduledAtUtc = DateTime.now().toUtc().add(
+        const Duration(minutes: 5),
+      );
+      final intent = ReminderIntent.oneShot(
+        id: record.reminderIntentId,
+        ownerId: record.ownerId,
+        ownerType: record.ownerType,
+        instantUtc: scheduledAtUtc,
+        updatedAtUtc: DateTime.now().toUtc(),
+        timeZone: widget.notifications.localTimeZoneId,
+      );
+
+      final result = await widget.notifications.scheduleReminder(
+        intent: intent,
+        deviceId: _deviceId,
+        title: record.title.trim().isEmpty ? 'Notificação' : record.title,
+        body: record.body,
+      );
+      if (result == null) {
+        _log('alarme não adiado: notificação sem próxima ocorrência');
+        return;
+      }
+
+      final withoutCurrent = await _withoutNotificationRecord(snapshot, record);
+      final next = withoutCurrent.copyWith(
+        scheduledNotifications: <ScheduledNotificationRecord>[
+          result.record,
+          ...withoutCurrent.scheduledNotifications.where(
+            (candidate) => candidate.id != result.record.id,
+          ),
+        ],
+      );
+      await _saveSnapshot(next);
+      await _recordNotificationRevision(
+        record: result.record,
+        note: _noteForNotification(record),
+        action: 'adiada 5 min',
+      );
+      await _refreshPendingCount();
+      setState(() {
+        _activeAlarmRecord = null;
+        _selectedIndex = 0;
+      });
+      _log('alarme adiado 5 min: ${formatLocalDateTime(scheduledAtUtc)}');
+    });
+  }
+
+  Future<void> _cancelActiveAlarm() async {
+    final record = _activeAlarmRecord;
+    await widget.alarmPlayback.stop();
+    if (mounted) {
+      setState(() => _activeAlarmRecord = null);
+    } else {
+      _activeAlarmRecord = null;
+    }
+    if (record == null) {
+      _log('alarme cancelado');
+      return;
+    }
+    await _cancelNotification(record);
   }
 
   Future<void> _saveSnapshot(AppSnapshot snapshot) async {
@@ -1760,7 +1839,8 @@ final class _CurioAppState extends State<CurioApp> {
                     pendingCount: _pendingCount,
                     activeAlarm: _activeAlarmRecord,
                     onRequestPermissions: _requestPermissions,
-                    onStopActiveAlarm: () => unawaited(_stopLocalAlarm()),
+                    onSnoozeActiveAlarm: () => unawaited(_snoozeActiveAlarm()),
+                    onCancelActiveAlarm: () => unawaited(_cancelActiveAlarm()),
                     onOpenNote: (date) => unawaited(_openDailyNote(date)),
                     onOpenNotification: (record) =>
                         unawaited(_openNotificationTarget(record)),
