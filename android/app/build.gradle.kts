@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     id("com.android.application")
@@ -82,6 +83,34 @@ gradle.taskGraph.whenReady {
                 "Copy android/key.properties.example, fill a private upload key, " +
                 "and keep the real key.properties file out of source control.",
         )
+    }
+}
+
+fun stripIntegrationTestPluginFromGeneratedRegistrant() {
+    val file = layout.projectDirectory
+        .file("src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
+        .asFile
+    if (!file.exists()) {
+        return
+    }
+
+    val original = file.readText()
+    val stripped = original.replace(
+        Regex(
+            """(?s)\n\s*try\s*\{\s*flutterEngine\.getPlugins\(\)\.add\(new dev\.flutter\.plugins\.integration_test\.IntegrationTestPlugin\(\)\);\s*\}\s*catch \(Exception e\) \{\s*Log\.e\(TAG, "Error registering plugin integration_test, dev\.flutter\.plugins\.integration_test\.IntegrationTestPlugin", e\);\s*\}""",
+        ),
+        "",
+    )
+    if (stripped != original) {
+        file.writeText(stripped)
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    if (name == "compileReleaseJavaWithJavac") {
+        doFirst {
+            stripIntegrationTestPluginFromGeneratedRegistrant()
+        }
     }
 }
 
