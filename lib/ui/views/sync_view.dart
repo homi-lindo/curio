@@ -4,6 +4,7 @@ import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 
 import '../../services/appearance_settings_store.dart';
+import '../../services/alarm_settings_store.dart';
 import '../../services/local_sync_sidecar.dart';
 import '../../services/sync_settings_store.dart';
 import '../../theme/curio_theme.dart';
@@ -23,12 +24,21 @@ final class SyncView extends StatelessWidget {
     required this.tokenController,
     required this.settings,
     required this.appearance,
+    required this.alarmSettings,
+    required this.alarmPlaying,
     required this.sidecarSupported,
     required this.sidecarState,
     required this.lastResult,
     required this.snapshot,
     required this.onSave,
     required this.onAppearanceChanged,
+    required this.onAlarmSettingsChanged,
+    required this.onPickAlarmAudio,
+    required this.onClearAlarmAudio,
+    required this.onTestAlarmAudio,
+    required this.onStopAlarmAudio,
+    required this.onExportCalendarIcs,
+    required this.onImportCalendarIcs,
     required this.onSync,
     required this.onCopyBackup,
     required this.onRestoreBackup,
@@ -42,12 +52,21 @@ final class SyncView extends StatelessWidget {
   final TextEditingController tokenController;
   final SyncSettings settings;
   final AppearanceSettings appearance;
+  final AlarmSettings alarmSettings;
+  final bool alarmPlaying;
   final bool sidecarSupported;
   final LocalSyncSidecarState? sidecarState;
   final SyncResult? lastResult;
   final AppSnapshot snapshot;
   final VoidCallback onSave;
   final ValueChanged<AppearanceSettings> onAppearanceChanged;
+  final ValueChanged<AlarmSettings> onAlarmSettingsChanged;
+  final VoidCallback onPickAlarmAudio;
+  final VoidCallback onClearAlarmAudio;
+  final VoidCallback onTestAlarmAudio;
+  final VoidCallback onStopAlarmAudio;
+  final VoidCallback onExportCalendarIcs;
+  final VoidCallback onImportCalendarIcs;
   final VoidCallback onSync;
   final VoidCallback onCopyBackup;
   final VoidCallback onRestoreBackup;
@@ -81,6 +100,17 @@ final class SyncView extends StatelessWidget {
           _AppearancePanel(
             settings: appearance,
             onChanged: onAppearanceChanged,
+          ),
+          const SizedBox(height: 14),
+          _AlarmPanel(
+            settings: alarmSettings,
+            playing: alarmPlaying,
+            busy: busy,
+            onChanged: onAlarmSettingsChanged,
+            onPickAudio: onPickAlarmAudio,
+            onClearAudio: onClearAlarmAudio,
+            onTestAudio: onTestAlarmAudio,
+            onStopAudio: onStopAlarmAudio,
           ),
           const SizedBox(height: 14),
           Surface(
@@ -160,6 +190,16 @@ final class SyncView extends StatelessWidget {
                       onPressed: busy ? null : onRestoreBackup,
                       icon: const Icon(Icons.restore_page_outlined),
                       label: const Text('Restaurar TXT'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: busy ? null : onExportCalendarIcs,
+                      icon: const Icon(Icons.calendar_month_outlined),
+                      label: const Text('Exportar .ics'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: busy ? null : onImportCalendarIcs,
+                      icon: const Icon(Icons.event_repeat_outlined),
+                      label: const Text('Importar .ics'),
                     ),
                   ],
                 ),
@@ -358,6 +398,102 @@ final class _AppearancePanel extends StatelessWidget {
             onChanged: (themeProfile) {
               onChanged(settings.copyWith(themeProfile: themeProfile));
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _AlarmPanel extends StatelessWidget {
+  const _AlarmPanel({
+    required this.settings,
+    required this.playing,
+    required this.busy,
+    required this.onChanged,
+    required this.onPickAudio,
+    required this.onClearAudio,
+    required this.onTestAudio,
+    required this.onStopAudio,
+  });
+
+  final AlarmSettings settings;
+  final bool playing;
+  final bool busy;
+  final ValueChanged<AlarmSettings> onChanged;
+  final VoidCallback onPickAudio;
+  final VoidCallback onClearAudio;
+  final VoidCallback onTestAudio;
+  final VoidCallback onStopAudio;
+
+  @override
+  Widget build(BuildContext context) {
+    return Surface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SectionHeader(
+            icon: Icons.alarm_on_outlined,
+            title: 'Alarmes',
+            action: playing
+                ? FilledButton.tonalIcon(
+                    onPressed: busy ? null : onStopAudio,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('Parar som'),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 14),
+          _SegmentedControlRow<AlarmSoundSource>(
+            label: 'Áudio',
+            segments: const <ButtonSegment<AlarmSoundSource>>[
+              ButtonSegment<AlarmSoundSource>(
+                value: AlarmSoundSource.system,
+                icon: Icon(Icons.volume_up_outlined),
+                label: Text('Sistema'),
+              ),
+              ButtonSegment<AlarmSoundSource>(
+                value: AlarmSoundSource.custom,
+                icon: Icon(Icons.library_music_outlined),
+                label: Text('Arquivo'),
+              ),
+            ],
+            selected: settings.soundSource,
+            onChanged: (source) =>
+                onChanged(settings.copyWith(soundSource: source)),
+          ),
+          const SizedBox(height: 12),
+          MetricLine('Atual', settings.label),
+          MetricLine('Formatos', alarmAudioExtensionsLabel),
+          const SizedBox(height: 12),
+          Text(
+            'O toque contínuo funciona enquanto o Curió está aberto ou iniciado '
+            'com o Windows. Se o app estiver fechado, fica valendo o alarme do sistema.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              FilledButton.tonalIcon(
+                onPressed: busy ? null : onPickAudio,
+                icon: const Icon(Icons.upload_file_outlined),
+                label: const Text('Escolher áudio'),
+              ),
+              OutlinedButton.icon(
+                onPressed: busy ? null : onTestAudio,
+                icon: const Icon(Icons.play_arrow_outlined),
+                label: const Text('Testar'),
+              ),
+              OutlinedButton.icon(
+                onPressed: busy || !settings.hasCustomAudio
+                    ? null
+                    : onClearAudio,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Remover áudio'),
+              ),
+            ],
           ),
         ],
       ),

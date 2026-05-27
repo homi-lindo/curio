@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,8 +14,11 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_brand.dart';
 import 'services/action_error_describer.dart';
+import 'services/alarm_playback_service.dart';
+import 'services/alarm_settings_store.dart';
 import 'services/appearance_settings_store.dart';
 import 'services/async_action_gate.dart';
+import 'services/calendar_ics_codec.dart';
 import 'services/device_identity.dart';
 import 'services/id_generator.dart';
 import 'services/local_store.dart';
@@ -53,11 +57,15 @@ final class CurioApp extends StatefulWidget {
     DeviceIdentityStore? deviceIdentity,
     SyncSettingsStore? syncSettings,
     AppearanceSettingsStore? appearanceSettings,
+    AlarmSettingsStore? alarmSettings,
+    AlarmPlaybackService? alarmPlayback,
     NoteEditHistoryStore? noteHistory,
   }) : store = store ?? LocalStore(),
        deviceIdentity = deviceIdentity ?? DeviceIdentityStore(),
        syncSettings = syncSettings ?? SyncSettingsStore(),
        appearanceSettings = appearanceSettings ?? AppearanceSettingsStore(),
+       alarmSettings = alarmSettings ?? AlarmSettingsStore(),
+       alarmPlayback = alarmPlayback ?? AlarmPlaybackService(),
        noteHistory = noteHistory ?? NoteEditHistoryStore();
 
   final NotificationService notifications;
@@ -65,6 +73,8 @@ final class CurioApp extends StatefulWidget {
   final DeviceIdentityStore deviceIdentity;
   final SyncSettingsStore syncSettings;
   final AppearanceSettingsStore appearanceSettings;
+  final AlarmSettingsStore alarmSettings;
+  final AlarmPlaybackService alarmPlayback;
   final NoteEditHistoryStore noteHistory;
 
   @override
@@ -83,6 +93,7 @@ final class _CurioAppState extends State<CurioApp> {
   final SyncSettingsValidator _syncSettingsValidator =
       const SyncSettingsValidator();
   final ManualBackupCodec _manualBackupCodec = const ManualBackupCodec();
+  final CalendarIcsCodec _calendarIcsCodec = const CalendarIcsCodec();
   final WindowsAttentionService _windowsAttention =
       const WindowsAttentionService();
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
@@ -99,13 +110,15 @@ final class _CurioAppState extends State<CurioApp> {
   String _deviceId = 'lume-${defaultTargetPlatform.name}';
   SyncSettings _syncSettings = const SyncSettings();
   AppearanceSettings _appearance = const AppearanceSettings();
+  AlarmSettings _alarmSettings = const AlarmSettings();
   LocalSyncSidecarState? _syncSidecarState;
   SyncResult? _lastSyncResult;
   AppSnapshot? _snapshot;
   String? _selectedNoteId;
+  ScheduledNotificationRecord? _activeAlarmRecord;
   List<NoteEditRevision> _noteHistory = const <NoteEditRevision>[];
   final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
-  final Map<int, Timer> _windowsAttentionTimers = <int, Timer>{};
+  final Map<int, Timer> _localAlarmTimers = <int, Timer>{};
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
   bool _notificationComposerOpen = false;
@@ -136,10 +149,11 @@ final class _CurioAppState extends State<CurioApp> {
     _noteController.dispose();
     _syncServerController.dispose();
     _syncTokenController.dispose();
-    for (final timer in _windowsAttentionTimers.values) {
+    for (final timer in _localAlarmTimers.values) {
       timer.cancel();
     }
-    _windowsAttentionTimers.clear();
+    _localAlarmTimers.clear();
+    unawaited(widget.alarmPlayback.stop());
     unawaited(_syncSidecar.stop());
     super.dispose();
   }
@@ -148,6 +162,7 @@ final class _CurioAppState extends State<CurioApp> {
     final deviceId = await widget.deviceIdentity.load();
     final syncSettings = await widget.syncSettings.load();
     final appearance = await widget.appearanceSettings.load();
+    final alarmSettings = await widget.alarmSettings.load();
     final noteHistory = await widget.noteHistory.load();
     final snapshot = await widget.store.load();
     if (mounted) {
@@ -155,6 +170,7 @@ final class _CurioAppState extends State<CurioApp> {
         _deviceId = deviceId;
         _syncSettings = syncSettings;
         _appearance = appearance;
+        _alarmSettings = alarmSettings;
         _uiZoom = appearance.pageZoom;
         _syncServerController.text = syncSettings.serverUrl;
         _syncTokenController.text = syncSettings.authToken;
@@ -167,6 +183,7 @@ final class _CurioAppState extends State<CurioApp> {
       _deviceId = deviceId;
       _syncSettings = syncSettings;
       _appearance = appearance;
+      _alarmSettings = alarmSettings;
       _uiZoom = appearance.pageZoom;
       _syncServerController.text = syncSettings.serverUrl;
       _syncTokenController.text = syncSettings.authToken;
@@ -175,7 +192,7 @@ final class _CurioAppState extends State<CurioApp> {
       _selectedNoteId = snapshot.notes.firstOrNull?.id;
       _noteController.text = snapshot.notes.firstOrNull?.body ?? '';
     }
-    _refreshWindowsAttentionTimers(snapshot.scheduledNotifications);
+    _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
 
     final notificationsReady = await _initializeNotificationsSafely();
     await widget.store.file;
@@ -951,6 +968,204 @@ final class _CurioAppState extends State<CurioApp> {
     }
   }
 
+  Future<void> _saveAlarmSettings(AlarmSettings settings) async {
+    try {
+      await widget.alarmSettings.save(settings);
+      if (mounted) {
+        setState(() => _alarmSettings = settings);
+      } else {
+        _alarmSettings = settings;
+      }
+      _log('alarme: ${settings.label}');
+    } on Object catch (error) {
+      _log('alarme não salvo: ${_errorDescriber.describe(error)}');
+    }
+  }
+
+  Future<void> _pickAlarmAudio() async {
+    await _runAction(() async {
+      final result = await FilePicker.pickFiles(
+        dialogTitle: 'Escolher áudio do alarme',
+        type: FileType.custom,
+        allowedExtensions: alarmAudioExtensions,
+        allowMultiple: false,
+        withData: false,
+      );
+      final path = result?.files.single.path;
+      if (path == null || path.trim().isEmpty) {
+        return;
+      }
+
+      final settings = await widget.alarmSettings.installCustomAudio(
+        path,
+        current: _alarmSettings,
+      );
+      setState(() => _alarmSettings = settings);
+      _log('áudio de alarme salvo: ${settings.customAudioName}');
+    });
+  }
+
+  Future<void> _clearAlarmAudio() async {
+    await _runAction(() async {
+      final settings = await widget.alarmSettings.clearCustomAudio(
+        _alarmSettings,
+      );
+      await widget.alarmPlayback.stop();
+      setState(() {
+        _alarmSettings = settings;
+        _activeAlarmRecord = null;
+      });
+      _log('áudio personalizado removido');
+    });
+  }
+
+  Future<void> _testAlarmAudio() async {
+    await _runAction(() async {
+      final result = await widget.alarmPlayback.start(
+        _alarmSettings,
+        windowsAttention: _windowsAttention,
+      );
+      final didFlash = defaultTargetPlatform == TargetPlatform.windows
+          ? _windowsAttention.flashTaskbar(count: 16)
+          : false;
+      setState(() => _activeAlarmRecord = null);
+      _log(didFlash ? '${result.message}; ícone piscando' : result.message);
+    });
+  }
+
+  Future<void> _exportCalendarIcs() async {
+    await _runAction(() async {
+      final snapshot = _snapshot;
+      if (snapshot == null) {
+        return;
+      }
+
+      final ics = _calendarIcsCodec.encode(snapshot);
+      final fileName =
+          'curio-agenda-${_backupFileTimestamp(DateTime.now())}.ics';
+      final path = await FilePicker.saveFile(
+        dialogTitle: 'Exportar agenda para Outlook/Google',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: const <String>['ics'],
+        bytes: Uint8List.fromList(utf8.encode(ics)),
+        lockParentWindow: true,
+      );
+      if (path == null) {
+        return;
+      }
+      _log('agenda .ics exportada: $path');
+    });
+  }
+
+  Future<void> _importCalendarIcs() async {
+    await _runAction(() async {
+      final result = await FilePicker.pickFiles(
+        dialogTitle: 'Importar agenda do Outlook/Google',
+        type: FileType.custom,
+        allowedExtensions: const <String>['ics'],
+        allowMultiple: false,
+        withData: false,
+      );
+      final path = result?.files.single.path;
+      if (path == null || path.trim().isEmpty) {
+        return;
+      }
+
+      final import = _calendarIcsCodec.decode(await File(path).readAsString());
+      await _applyCalendarImport(import);
+      _log('agenda .ics importada: ${import.events.length} evento(s)');
+    });
+  }
+
+  Future<void> _applyCalendarImport(CalendarIcsImport import) async {
+    var snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
+
+    final nowUtc = DateTime.now().toUtc();
+    final timedFutureEvents = import.events.where(
+      (event) => !event.allDay && event.startsAtUtc.isAfter(nowUtc),
+    );
+    if (timedFutureEvents.isNotEmpty) {
+      final authorized = await _ensureNotificationCreationAuthorization();
+      if (!authorized) {
+        _log('agenda não importada: autorização de notificação pendente');
+        return;
+      }
+    }
+
+    final notes = <NoteItem>[...snapshot.notes];
+    final importedRecords = <ScheduledNotificationRecord>[];
+    var notesChanged = 0;
+    var notificationsChanged = 0;
+
+    for (final event in import.events) {
+      final localDate = dateOnly(event.startsAtUtc.toLocal());
+      final note = _upsertImportedDailyNote(
+        notes,
+        date: localDate,
+        event: event,
+        nowUtc: nowUtc,
+      );
+      if (note.changed) {
+        notesChanged++;
+      }
+
+      if (event.allDay || !event.startsAtUtc.isAfter(nowUtc)) {
+        continue;
+      }
+
+      final alreadyExists = snapshot.scheduledNotifications.any(
+        (record) =>
+            record.title.trim() == event.title.trim() &&
+            record.scheduledForUtc
+                    .difference(event.startsAtUtc)
+                    .abs()
+                    .inMinutes ==
+                0,
+      );
+      if (alreadyExists) {
+        continue;
+      }
+
+      final intent = ReminderIntent.oneShot(
+        id: newId('ics'),
+        ownerId: note.note.id,
+        ownerType: ReminderOwnerType.note,
+        instantUtc: event.startsAtUtc,
+        updatedAtUtc: nowUtc,
+        timeZone: widget.notifications.localTimeZoneId,
+      );
+      final result = await widget.notifications.scheduleReminder(
+        intent: intent,
+        deviceId: _deviceId,
+        title: event.title,
+        body: event.description,
+      );
+      if (result != null) {
+        importedRecords.add(result.record);
+        notificationsChanged++;
+      }
+    }
+
+    snapshot = snapshot.copyWith(
+      notes: notes,
+      scheduledNotifications: <ScheduledNotificationRecord>[
+        ...importedRecords,
+        ...snapshot.scheduledNotifications,
+      ],
+    );
+    await _saveSnapshot(snapshot);
+    _syncSelectionAfterSnapshot(snapshot);
+    await _refreshPendingCount();
+    _log(
+      'agenda aplicada: $notesChanged nota(s), '
+      '$notificationsChanged notificação(ões)',
+    );
+  }
+
   Future<void> _copyManualBackup() async {
     await _runAction(() async {
       final snapshot = _snapshot;
@@ -1325,17 +1540,13 @@ final class _CurioAppState extends State<CurioApp> {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
-  void _refreshWindowsAttentionTimers(
+  void _refreshLocalAlarmTimers(
     Iterable<ScheduledNotificationRecord> notifications,
   ) {
-    if (defaultTargetPlatform != TargetPlatform.windows) {
-      return;
-    }
-
-    for (final timer in _windowsAttentionTimers.values) {
+    for (final timer in _localAlarmTimers.values) {
       timer.cancel();
     }
-    _windowsAttentionTimers.clear();
+    _localAlarmTimers.clear();
 
     final now = DateTime.now().toUtc();
     final upcoming =
@@ -1346,24 +1557,43 @@ final class _CurioAppState extends State<CurioApp> {
 
     for (final record in upcoming.take(64)) {
       final delay = record.scheduledForUtc.difference(now);
-      _windowsAttentionTimers[record.id] = Timer(delay, () {
-        _windowsAttentionTimers.remove(record.id);
-        final didPlaySound = _windowsAttention.playAlarmFallback();
-        final didFlash = _windowsAttention.flashTaskbar(count: 10);
-        _log(switch ((didPlaySound, didFlash)) {
-          (true, true) => 'alarme local tocou e ícone piscou',
-          (true, false) =>
-            'alarme local tocou; ícone não piscou: janela não localizada',
-          (false, true) => 'ícone piscou; som local indisponível',
-          (false, false) => 'alarme local indisponível no Windows',
-        });
+      _localAlarmTimers[record.id] = Timer(delay, () {
+        _localAlarmTimers.remove(record.id);
+        unawaited(_startLocalAlarm(record));
       });
     }
   }
 
+  Future<void> _startLocalAlarm(ScheduledNotificationRecord record) async {
+    if (mounted) {
+      setState(() => _activeAlarmRecord = record);
+    } else {
+      _activeAlarmRecord = record;
+    }
+
+    final result = await widget.alarmPlayback.start(
+      _alarmSettings,
+      windowsAttention: _windowsAttention,
+    );
+    final didFlash = defaultTargetPlatform == TargetPlatform.windows
+        ? _windowsAttention.flashTaskbar(count: 24)
+        : false;
+    _log(didFlash ? '${result.message}; ícone piscando' : result.message);
+  }
+
+  Future<void> _stopLocalAlarm() async {
+    await widget.alarmPlayback.stop();
+    if (mounted) {
+      setState(() => _activeAlarmRecord = null);
+    } else {
+      _activeAlarmRecord = null;
+    }
+    _log('alarme contínuo parado');
+  }
+
   Future<void> _saveSnapshot(AppSnapshot snapshot) async {
     await _snapshotWrites.save(snapshot);
-    _refreshWindowsAttentionTimers(snapshot.scheduledNotifications);
+    _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
     if (mounted) {
       setState(() => _snapshot = snapshot);
     } else {
@@ -1528,7 +1758,9 @@ final class _CurioAppState extends State<CurioApp> {
                     busy: _busy,
                     permissionState: _permissionState,
                     pendingCount: _pendingCount,
+                    activeAlarm: _activeAlarmRecord,
                     onRequestPermissions: _requestPermissions,
+                    onStopActiveAlarm: () => unawaited(_stopLocalAlarm()),
                     onOpenNote: (date) => unawaited(_openDailyNote(date)),
                     onOpenNotification: (record) =>
                         unawaited(_openNotificationTarget(record)),
@@ -1609,12 +1841,22 @@ final class _CurioAppState extends State<CurioApp> {
                     tokenController: _syncTokenController,
                     settings: _syncSettings,
                     appearance: _appearance,
+                    alarmSettings: _alarmSettings,
+                    alarmPlaying: widget.alarmPlayback.isPlaying,
                     sidecarSupported: _syncSidecarSupported,
                     sidecarState: _syncSidecarState,
                     lastResult: _lastSyncResult,
                     snapshot: appSnapshot,
                     onSave: _saveSyncSettings,
                     onAppearanceChanged: _saveAppearanceSettings,
+                    onAlarmSettingsChanged: (settings) =>
+                        unawaited(_saveAlarmSettings(settings)),
+                    onPickAlarmAudio: () => unawaited(_pickAlarmAudio()),
+                    onClearAlarmAudio: () => unawaited(_clearAlarmAudio()),
+                    onTestAlarmAudio: () => unawaited(_testAlarmAudio()),
+                    onStopAlarmAudio: () => unawaited(_stopLocalAlarm()),
+                    onExportCalendarIcs: () => unawaited(_exportCalendarIcs()),
+                    onImportCalendarIcs: () => unawaited(_importCalendarIcs()),
                     onSync: _runSync,
                     onCopyBackup: () => unawaited(_copyManualBackup()),
                     onRestoreBackup: () =>
@@ -1635,6 +1877,58 @@ final class _CurioAppState extends State<CurioApp> {
 // ---------------------------------------------------------------------------
 // Private helpers (stay in main.dart)
 // ---------------------------------------------------------------------------
+
+final class _ImportedNoteResult {
+  const _ImportedNoteResult({required this.note, required this.changed});
+
+  final NoteItem note;
+  final bool changed;
+}
+
+_ImportedNoteResult _upsertImportedDailyNote(
+  List<NoteItem> notes, {
+  required DateTime date,
+  required CalendarIcsEvent event,
+  required DateTime nowUtc,
+}) {
+  final title = dailyNoteTitle(date);
+  final existingIndex = notes.indexWhere((note) => note.title == title);
+  final entry = _calendarEventMarkdown(event);
+
+  if (existingIndex == -1) {
+    final note = NoteItem(
+      id: newId('note'),
+      title: title,
+      body: '## ${formatLocalDate(date)}\n\n$entry\n',
+      createdAtUtc: nowUtc,
+      updatedAtUtc: nowUtc,
+    );
+    notes.insert(0, note);
+    return _ImportedNoteResult(note: note, changed: true);
+  }
+
+  final existing = notes[existingIndex];
+  if (existing.body.contains(entry)) {
+    return _ImportedNoteResult(note: existing, changed: false);
+  }
+
+  final separator = existing.body.trimRight().isEmpty ? '' : '\n';
+  final updated = existing.copyWith(
+    body: '${existing.body.trimRight()}$separator$entry\n',
+    updatedAtUtc: nowUtc,
+  );
+  notes[existingIndex] = updated;
+  return _ImportedNoteResult(note: updated, changed: true);
+}
+
+String _calendarEventMarkdown(CalendarIcsEvent event) {
+  final label = event.allDay ? 'dia todo' : formatLocalTime(event.startsAtUtc);
+  final description = event.description.trim();
+  if (description.isEmpty) {
+    return '- $label · ${event.title}';
+  }
+  return '- $label · ${event.title}: $description';
+}
 
 String _backupFileTimestamp(DateTime value) {
   final local = value.toLocal();

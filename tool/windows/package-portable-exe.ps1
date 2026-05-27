@@ -90,6 +90,7 @@ const string AppId = @"$portableId";
 const string PayloadSha256 = @"$zipSha256";
 const string AumId = "App.Lume.Personal";
 const string ShortcutDisplayName = "Curio Portable";
+const string StartupShortcutDisplayName = "Curio Portable Alarm";
 
 var target = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -132,6 +133,15 @@ try
     try
     {
         ShortcutHelper.CreateWithAumid(appExe, target, shortcutPath, AumId);
+
+        // Keep the portable alarm process in the user's desktop session after
+        // login. A Windows Service cannot reliably show toast UI or play audio
+        // in the interactive session because services run in session 0.
+        var startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+        var startupShortcutPath = Path.Combine(
+            startupFolder,
+            StartupShortcutDisplayName + ".lnk");
+        ShortcutHelper.CreateWithAumid(appExe, target, startupShortcutPath, AumId);
     }
     catch (Exception shortcutError)
     {

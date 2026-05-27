@@ -19,7 +19,9 @@ final class TodayView extends StatelessWidget {
     required this.busy,
     required this.permissionState,
     required this.pendingCount,
+    required this.activeAlarm,
     required this.onRequestPermissions,
+    required this.onStopActiveAlarm,
     required this.onOpenNote,
     required this.onOpenNotification,
     required this.onCreateStandaloneNotification,
@@ -31,7 +33,9 @@ final class TodayView extends StatelessWidget {
   final bool busy;
   final NotificationPermissionState permissionState;
   final int pendingCount;
+  final ScheduledNotificationRecord? activeAlarm;
   final VoidCallback onRequestPermissions;
+  final VoidCallback onStopActiveAlarm;
   final ValueChanged<DateTime> onOpenNote;
   final ValueChanged<ScheduledNotificationRecord> onOpenNotification;
   final VoidCallback onCreateStandaloneNotification;
@@ -51,6 +55,13 @@ final class TodayView extends StatelessWidget {
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= 980;
           final children = <Widget>[
+            if (activeAlarm != null)
+              _ActiveAlarmPanel(
+                notes: notes,
+                record: activeAlarm!,
+                onStop: onStopActiveAlarm,
+                onOpen: () => onOpenNotification(activeAlarm!),
+              ),
             _TodayDailyPanel(
               notes: notes,
               scheduledNotifications: scheduledNotifications,
@@ -75,21 +86,82 @@ final class TodayView extends StatelessWidget {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Expanded(flex: 6, child: children[0]),
+                Expanded(
+                  flex: 6,
+                  child: Column(
+                    children: <Widget>[
+                      if (activeAlarm != null) ...<Widget>[
+                        children[0],
+                        const SizedBox(height: 16),
+                      ],
+                      children[activeAlarm == null ? 0 : 1],
+                    ],
+                  ),
+                ),
                 const SizedBox(width: 18),
-                Expanded(flex: 5, child: children[1]),
+                Expanded(flex: 5, child: children[activeAlarm == null ? 1 : 2]),
               ],
             );
           }
 
           return Column(
-            children: <Widget>[
-              children[0],
-              const SizedBox(height: 16),
-              children[1],
+            children: [
+              for (final child in children) ...<Widget>[
+                child,
+                if (child != children.last) const SizedBox(height: 16),
+              ],
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+final class _ActiveAlarmPanel extends StatelessWidget {
+  const _ActiveAlarmPanel({
+    required this.notes,
+    required this.record,
+    required this.onStop,
+    required this.onOpen,
+  });
+
+  final List<NoteItem> notes;
+  final ScheduledNotificationRecord record;
+  final VoidCallback onStop;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Surface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SectionHeader(
+            icon: Icons.alarm_on_outlined,
+            title: notificationRecordTitle(record, notes),
+            action: Wrap(
+              spacing: 10,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.open_in_new_outlined),
+                  label: const Text('Abrir'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: onStop,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('Parar alarme'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            formatLocalDateTime(record.scheduledForUtc),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ),
     );
   }
