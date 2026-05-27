@@ -262,8 +262,8 @@ final class NotificationService {
     return _plugin.pendingNotificationRequests();
   }
 
-  static const NotificationDetails _details = NotificationDetails(
-    android: AndroidNotificationDetails(
+  static final NotificationDetails _details = NotificationDetails(
+    android: const AndroidNotificationDetails(
       'lume_reminders',
       '$appDisplayName reminders',
       channelDescription: 'Lembretes de notas e agenda do $appDisplayName',
@@ -272,7 +272,10 @@ final class NotificationService {
       category: AndroidNotificationCategory.reminder,
     ),
     windows: WindowsNotificationDetails(
-      scenario: WindowsNotificationScenario.reminder,
+      audio: WindowsNotificationAudio.preset(
+        sound: WindowsNotificationSound.alarm1,
+      ),
+      scenario: WindowsNotificationScenario.alarm,
       duration: WindowsNotificationDuration.long,
     ),
   );

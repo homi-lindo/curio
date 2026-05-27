@@ -1,9 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lume/app_brand.dart';
 import 'package:lume/services/notification_service.dart';
+import 'package:lume/services/windows_attention_service.dart';
 import 'package:lume_core/domain/reminder.dart';
 
 Future<void> main() async {
@@ -17,6 +18,9 @@ Future<void> main() async {
 
   final plugin = FlutterLocalNotificationsPlugin();
   final service = NotificationService(plugin: plugin);
+  runApp(const _SmokeWindow());
+  await Future<void>.delayed(const Duration(milliseconds: 700));
+
   await service.initialize();
 
   final stamp = DateTime.now();
@@ -24,19 +28,24 @@ Future<void> main() async {
   final scheduleInstant = stamp.add(const Duration(minutes: 10));
   final scheduleTitle =
       'Curió smoke agendado ${_hhmm(scheduleInstant.toLocal())}';
+  final attention = const WindowsAttentionService();
 
   await plugin.show(
     id: immediateId,
     title: 'Curió smoke Windows ${_hhmm(stamp)}',
     body: 'Toast imediato do teste local.',
-    notificationDetails: const NotificationDetails(
+    notificationDetails: NotificationDetails(
       windows: WindowsNotificationDetails(
-        scenario: WindowsNotificationScenario.reminder,
+        audio: WindowsNotificationAudio.preset(
+          sound: WindowsNotificationSound.alarm1,
+        ),
+        scenario: WindowsNotificationScenario.alarm,
         duration: WindowsNotificationDuration.long,
       ),
     ),
     payload: 'curio://smoke/windows/immediate',
   );
+  final didFlash = attention.flashTaskbar(count: 10);
 
   final result = await service.scheduleReminder(
     intent: ReminderIntent.oneShot(
@@ -75,6 +84,7 @@ Future<void> main() async {
   stdout.writeln('SMOKE_WINDOWS_NOTIFICATION_OK');
   stdout.writeln('AUMID: $appWindowsAppUserModelId');
   stdout.writeln('Toast imediato: $immediateId');
+  stdout.writeln('Ícone piscou: $didFlash');
   stdout.writeln('Agendada e cancelada: $scheduledId');
 
   await Future<void>.delayed(const Duration(seconds: 3));
@@ -85,4 +95,18 @@ String _hhmm(DateTime value) {
   final hour = value.hour.toString().padLeft(2, '0');
   final minute = value.minute.toString().padLeft(2, '0');
   return '$hour:$minute';
+}
+
+final class _SmokeWindow extends StatelessWidget {
+  const _SmokeWindow();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(child: Text('Curió - teste de alarme Windows')),
+      ),
+    );
+  }
 }

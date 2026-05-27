@@ -27,6 +27,7 @@ import 'services/notification_timezone_audit.dart';
 import 'services/snapshot_write_queue.dart';
 import 'services/sync_settings_store.dart';
 import 'services/sync_settings_validator.dart';
+import 'services/windows_attention_service.dart';
 import 'sync/http_sync_adapter.dart';
 import 'theme/curio_theme.dart';
 import 'ui/global_search_dialog.dart';
@@ -82,6 +83,8 @@ final class _CurioAppState extends State<CurioApp> {
   final SyncSettingsValidator _syncSettingsValidator =
       const SyncSettingsValidator();
   final ManualBackupCodec _manualBackupCodec = const ManualBackupCodec();
+  final WindowsAttentionService _windowsAttention =
+      const WindowsAttentionService();
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
@@ -102,6 +105,7 @@ final class _CurioAppState extends State<CurioApp> {
   String? _selectedNoteId;
   List<NoteEditRevision> _noteHistory = const <NoteEditRevision>[];
   final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
+  final Map<int, Timer> _windowsAttentionTimers = <int, Timer>{};
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
   bool _notificationComposerOpen = false;
@@ -132,6 +136,10 @@ final class _CurioAppState extends State<CurioApp> {
     _noteController.dispose();
     _syncServerController.dispose();
     _syncTokenController.dispose();
+    for (final timer in _windowsAttentionTimers.values) {
+      timer.cancel();
+    }
+    _windowsAttentionTimers.clear();
     unawaited(_syncSidecar.stop());
     super.dispose();
   }
@@ -167,6 +175,7 @@ final class _CurioAppState extends State<CurioApp> {
       _selectedNoteId = snapshot.notes.firstOrNull?.id;
       _noteController.text = snapshot.notes.firstOrNull?.body ?? '';
     }
+    _refreshWindowsAttentionTimers(snapshot.scheduledNotifications);
 
     final notificationsReady = await _initializeNotificationsSafely();
     await widget.store.file;
@@ -1316,8 +1325,42 @@ final class _CurioAppState extends State<CurioApp> {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
+  void _refreshWindowsAttentionTimers(
+    Iterable<ScheduledNotificationRecord> notifications,
+  ) {
+    if (defaultTargetPlatform != TargetPlatform.windows) {
+      return;
+    }
+
+    for (final timer in _windowsAttentionTimers.values) {
+      timer.cancel();
+    }
+    _windowsAttentionTimers.clear();
+
+    final now = DateTime.now().toUtc();
+    final upcoming =
+        notifications
+            .where((record) => record.scheduledForUtc.isAfter(now))
+            .toList()
+          ..sort((a, b) => a.scheduledForUtc.compareTo(b.scheduledForUtc));
+
+    for (final record in upcoming.take(64)) {
+      final delay = record.scheduledForUtc.difference(now);
+      _windowsAttentionTimers[record.id] = Timer(delay, () {
+        _windowsAttentionTimers.remove(record.id);
+        final didFlash = _windowsAttention.flashTaskbar(count: 10);
+        _log(
+          didFlash
+              ? 'ícone piscou para notificação'
+              : 'ícone não piscou: janela Windows não localizada',
+        );
+      });
+    }
+  }
+
   Future<void> _saveSnapshot(AppSnapshot snapshot) async {
     await _snapshotWrites.save(snapshot);
+    _refreshWindowsAttentionTimers(snapshot.scheduledNotifications);
     if (mounted) {
       setState(() => _snapshot = snapshot);
     } else {
