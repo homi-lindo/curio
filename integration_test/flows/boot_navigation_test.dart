@@ -41,42 +41,55 @@ void bootNavigationTests() {
     });
 
     testWidgets(
-        'NavigationRail nao exibe RenderFlex overflow em altura 520 (regressao)',
-        (tester) async {
-      // Set a surface that previously triggered RenderFlex overflow at
-      // main.dart:1842 in the NavigationRail leading Column.
-      await tester.binding.setSurfaceSize(const Size(1100, 520));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      'NavigationRail nao exibe RenderFlex overflow em altura 520 (regressao)',
+      (tester) async {
+        // Set a surface that previously triggered RenderFlex overflow at
+        // main.dart:1842 in the NavigationRail leading Column.
+        await tester.binding.setSurfaceSize(const Size(1100, 520));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      final harness = await pumpApp(tester);
-      addTearDown(harness.dispose);
+        final harness = await pumpApp(tester);
+        addTearDown(harness.dispose);
 
-      await tester.pumpAndSettle();
+        await _pumpNavigationFrames(tester);
 
-      // Navigate through all tabs at this narrow height.
-      for (final label in <String>['Agenda', 'Quadro', 'Notas', 'Sync', 'Hoje']) {
-        final dest = find.text(label);
-        if (dest.evaluate().isNotEmpty) {
-          // Use warnIfMissed: false — at 520px height, the last rail destination
-          // may scroll out of the visible area but the fix (SingleChildScrollView)
-          // prevents a hard overflow. We tap if reachable, skip if scrolled out.
-          await tester.tap(dest.first, warnIfMissed: false);
-          await tester.pumpAndSettle();
+        // Navigate through all tabs at this narrow height.
+        for (final label in <String>[
+          'Agenda',
+          'Quadro',
+          'Notas',
+          'Sync',
+          'Hoje',
+        ]) {
+          final dest = find.text(label);
+          if (dest.evaluate().isNotEmpty) {
+            // Use warnIfMissed: false — at 520px height, the last rail destination
+            // may scroll out of the visible area but the fix (SingleChildScrollView)
+            // prevents a hard overflow. We tap if reachable, skip if scrolled out.
+            await tester.tap(dest.first, warnIfMissed: false);
+            await _pumpNavigationFrames(tester);
+          }
         }
-      }
 
-      // The critical assertion: the exception list must NOT contain a
-      // "overflowed" error. Any ListTile-in-DecoratedBox assertions are a
-      // separate tracked bug (see Findings) and are not overflow errors.
-      final exception = tester.takeException();
-      if (exception != null) {
-        final msg = exception.toString();
-        expect(
-          msg.contains('overflowed') || msg.contains('RenderFlex'),
-          isFalse,
-          reason: 'RenderFlex overflow still present at 1100x520: $msg',
-        );
-      }
-    });
+        // The critical assertion: the exception list must NOT contain a
+        // "overflowed" error. Any ListTile-in-DecoratedBox assertions are a
+        // separate tracked bug (see Findings) and are not overflow errors.
+        final exception = tester.takeException();
+        if (exception != null) {
+          final msg = exception.toString();
+          expect(
+            msg.contains('overflowed') || msg.contains('RenderFlex'),
+            isFalse,
+            reason: 'RenderFlex overflow still present at 1100x520: $msg',
+          );
+        }
+      },
+    );
   });
+}
+
+Future<void> _pumpNavigationFrames(WidgetTester tester) async {
+  for (var i = 0; i < 6; i++) {
+    await tester.pump(const Duration(milliseconds: 200));
+  }
 }

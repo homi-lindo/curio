@@ -33,8 +33,9 @@ Future<TestHarness> pumpApp(WidgetTester tester) async {
   final db = AppDatabase(NativeDatabase.memory());
   final store = LocalStore.withDatabase(db, directoryProvider: tmpProvider);
 
+  final notifications = NotificationService();
   final app = CurioApp(
-    notifications: NotificationService(),
+    notifications: notifications,
     store: store,
     deviceIdentity: DeviceIdentityStore(directoryProvider: tmpProvider),
     syncSettings: SyncSettingsStore(directoryProvider: tmpProvider),
@@ -47,6 +48,7 @@ Future<TestHarness> pumpApp(WidgetTester tester) async {
   await tester.pumpAndSettle(const Duration(seconds: 3));
 
   return TestHarness(
+    notifications: notifications,
     store: store,
     tmpDir: tmpDir,
   );
@@ -54,10 +56,12 @@ Future<TestHarness> pumpApp(WidgetTester tester) async {
 
 final class TestHarness {
   const TestHarness({
+    required this.notifications,
     required this.store,
     required this.tmpDir,
   });
 
+  final NotificationService notifications;
   final LocalStore store;
   final Directory tmpDir;
 

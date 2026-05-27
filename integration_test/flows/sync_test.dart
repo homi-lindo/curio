@@ -49,14 +49,18 @@ void syncTests() {
       await tester.pumpAndSettle();
 
       // With empty URL, Salvar sync just saves empty settings (offline mode).
-      await tester.tap(find.text('Salvar sync'));
+      await _tapSyncButton(
+        tester,
+        find.widgetWithText(OutlinedButton, 'Salvar sync'),
+      );
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('sincronizar com URL vazia usa OfflineSyncAdapter sem excecao',
-        (tester) async {
+    testWidgets('sincronizar com URL vazia usa OfflineSyncAdapter sem excecao', (
+      tester,
+    ) async {
       final harness = await pumpApp(tester);
       addTearDown(harness.dispose);
 
@@ -64,7 +68,10 @@ void syncTests() {
       await tester.pumpAndSettle();
 
       // With empty server URL, tapping Sincronizar triggers OfflineSyncAdapter.
-      await tester.tap(find.text('Sincronizar'));
+      await _tapSyncButton(
+        tester,
+        find.widgetWithText(FilledButton, 'Sincronizar'),
+      );
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
@@ -80,13 +87,21 @@ void syncTests() {
       // Find the server URL TextField by its decoration labelText 'Servidor'.
       // The Sync surface shows TextField with labelText 'Servidor' (no hint
       // visible initially). Enter invalid URL.
-      final textFields = tester.widgetList<TextField>(find.byType(TextField)).toList();
+      final textFields = tester
+          .widgetList<TextField>(find.byType(TextField))
+          .toList();
       // First TextField on Sync view is the Servidor field.
       if (textFields.isNotEmpty) {
-        await tester.enterText(find.byType(TextField).first, 'http://u:p@bad.host');
+        await tester.enterText(
+          find.byType(TextField).first,
+          'http://u:p@bad.host',
+        );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('Salvar sync'));
+        await _tapSyncButton(
+          tester,
+          find.widgetWithText(OutlinedButton, 'Salvar sync'),
+        );
         await tester.pumpAndSettle();
 
         // _runAction catches ArgumentError from validator and shows SnackBar.
@@ -109,4 +124,10 @@ void syncTests() {
       expect(find.text('Restaurar TXT'), findsOneWidget);
     });
   });
+}
+
+Future<void> _tapSyncButton(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  await tester.tap(finder, warnIfMissed: false);
 }
