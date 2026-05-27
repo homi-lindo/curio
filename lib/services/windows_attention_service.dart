@@ -34,11 +34,27 @@ final class WindowsAttentionService {
       return false;
     }
   }
+
+  bool playAlarmFallback() {
+    if (!Platform.isWindows) {
+      return false;
+    }
+
+    try {
+      final didMessageBeep = _messageBeep(_mbIconExclamation) != 0;
+      final didHighBeep = _beep(880, 260) != 0;
+      final didLowBeep = _beep(660, 260) != 0;
+      return didMessageBeep || didHighBeep || didLowBeep;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 const int _flashCaption = 0x00000001;
 const int _flashTray = 0x00000002;
 const int _flashAll = _flashCaption | _flashTray;
+const int _mbIconExclamation = 0x00000030;
 
 final DynamicLibrary _user32 = DynamicLibrary.open('user32.dll');
 final DynamicLibrary _kernel32 = DynamicLibrary.open('kernel32.dll');
@@ -48,6 +64,17 @@ final int Function() _getCurrentProcessId = _kernel32
 
 final int Function() _getActiveWindow = _user32
     .lookupFunction<IntPtr Function(), int Function()>('GetActiveWindow');
+
+final int Function(int type) _messageBeep = _user32
+    .lookupFunction<Int32 Function(Uint32 type), int Function(int type)>(
+      'MessageBeep',
+    );
+
+final int Function(int frequency, int duration) _beep = _kernel32
+    .lookupFunction<
+      Int32 Function(Uint32 frequency, Uint32 duration),
+      int Function(int frequency, int duration)
+    >('Beep');
 
 final int Function(int hwnd, Pointer<Uint32> processId)
 _getWindowThreadProcessId = _user32

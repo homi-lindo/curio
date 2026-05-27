@@ -1348,12 +1348,15 @@ final class _CurioAppState extends State<CurioApp> {
       final delay = record.scheduledForUtc.difference(now);
       _windowsAttentionTimers[record.id] = Timer(delay, () {
         _windowsAttentionTimers.remove(record.id);
+        final didPlaySound = _windowsAttention.playAlarmFallback();
         final didFlash = _windowsAttention.flashTaskbar(count: 10);
-        _log(
-          didFlash
-              ? 'ícone piscou para notificação'
-              : 'ícone não piscou: janela Windows não localizada',
-        );
+        _log(switch ((didPlaySound, didFlash)) {
+          (true, true) => 'alarme local tocou e ícone piscou',
+          (true, false) =>
+            'alarme local tocou; ícone não piscou: janela não localizada',
+          (false, true) => 'ícone piscou; som local indisponível',
+          (false, false) => 'alarme local indisponível no Windows',
+        });
       });
     }
   }

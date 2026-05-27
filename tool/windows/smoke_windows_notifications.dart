@@ -46,6 +46,7 @@ Future<void> main() async {
     payload: 'curio://smoke/windows/immediate',
   );
   final didFlash = attention.flashTaskbar(count: 10);
+  final didPlayFallbackSound = attention.playAlarmFallback();
 
   final result = await service.scheduleReminder(
     intent: ReminderIntent.oneShot(
@@ -84,6 +85,7 @@ Future<void> main() async {
   stdout.writeln('SMOKE_WINDOWS_NOTIFICATION_OK');
   stdout.writeln('AUMID: $appWindowsAppUserModelId');
   stdout.writeln('Toast imediato: $immediateId');
+  stdout.writeln('Som fallback Win32: $didPlayFallbackSound');
   stdout.writeln('Ícone piscou: $didFlash');
   stdout.writeln('Agendada e cancelada: $scheduledId');
 

@@ -274,6 +274,7 @@ final class NotificationService {
     windows: WindowsNotificationDetails(
       audio: WindowsNotificationAudio.preset(
         sound: WindowsNotificationSound.alarm1,
+        shouldLoop: true,
       ),
       scenario: WindowsNotificationScenario.alarm,
       duration: WindowsNotificationDuration.long,
