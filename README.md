@@ -204,6 +204,7 @@ Checklist principal:
 - Android release exige `android/key.properties`.
 - Sync em release exige HTTPS.
 - Play Store exige declaração de uso de alarme exato.
+- Smoke manual de notificações deve seguir `docs/smoke-notificacoes.md`.
 - MSIX deve ser validado no WACK em PowerShell elevado antes do envio final.
 - A política de privacidade base está em `docs/privacy-policy.md`.
 - As notas de submissão ficam em `docs/store-submission-notes.md`,
