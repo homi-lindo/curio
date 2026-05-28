@@ -49,15 +49,59 @@ final class WindowsAttentionService {
       return false;
     }
   }
+
+  bool playWavLoop(String path) {
+    if (!Platform.isWindows) {
+      return false;
+    }
+
+    try {
+      final file = File(path);
+      if (!file.existsSync()) {
+        return false;
+      }
+
+      final nativePath = file.absolute.path.toNativeUtf16();
+      try {
+        return _playSound(
+              nativePath,
+              0,
+              _sndFilename | _sndAsync | _sndLoop | _sndNoDefault,
+            ) !=
+            0;
+      } finally {
+        calloc.free(nativePath);
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool stopLoopingSound() {
+    if (!Platform.isWindows) {
+      return false;
+    }
+
+    try {
+      return _playSound(nullptr.cast<Utf16>(), 0, 0) != 0;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 const int _flashCaption = 0x00000001;
 const int _flashTray = 0x00000002;
 const int _flashAll = _flashCaption | _flashTray;
 const int _mbIconExclamation = 0x00000030;
+const int _sndAsync = 0x0001;
+const int _sndNoDefault = 0x0002;
+const int _sndLoop = 0x0008;
+const int _sndFilename = 0x00020000;
 
 final DynamicLibrary _user32 = DynamicLibrary.open('user32.dll');
 final DynamicLibrary _kernel32 = DynamicLibrary.open('kernel32.dll');
+final DynamicLibrary _winmm = DynamicLibrary.open('winmm.dll');
 
 final int Function() _getCurrentProcessId = _kernel32
     .lookupFunction<Uint32 Function(), int Function()>('GetCurrentProcessId');
@@ -75,6 +119,12 @@ final int Function(int frequency, int duration) _beep = _kernel32
       Int32 Function(Uint32 frequency, Uint32 duration),
       int Function(int frequency, int duration)
     >('Beep');
+
+final int Function(Pointer<Utf16> sound, int module, int flags) _playSound =
+    _winmm.lookupFunction<
+      Int32 Function(Pointer<Utf16> sound, IntPtr module, Uint32 flags),
+      int Function(Pointer<Utf16> sound, int module, int flags)
+    >('PlaySoundW');
 
 final int Function(int hwnd, Pointer<Uint32> processId)
 _getWindowThreadProcessId = _user32

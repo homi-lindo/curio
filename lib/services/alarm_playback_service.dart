@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'alarm_settings_store.dart';
@@ -26,9 +26,11 @@ final class AlarmPlaybackService {
   StreamSubscription<void>? _completeSubscription;
   Timer? _loopWatchdog;
   Timer? _fallbackLoop;
+  void Function()? _nativeStop;
   int _loopGeneration = 0;
 
-  bool get isPlaying => _player != null || _fallbackLoop != null;
+  bool get isPlaying =>
+      _player != null || _fallbackLoop != null || _nativeStop != null;
 
   Future<AlarmPlaybackResult> start(
     AlarmSettings settings, {
@@ -38,7 +40,10 @@ final class AlarmPlaybackService {
 
     if (settings.soundSource == AlarmSoundSource.custom &&
         settings.customAudioPath.trim().isNotEmpty) {
-      final customResult = await _startCustomLoop(settings.customAudioPath);
+      final customResult = await _startCustomLoop(
+        settings.customAudioPath,
+        windowsAttention,
+      );
       if (customResult.started) {
         return customResult;
       }
@@ -49,6 +54,9 @@ final class AlarmPlaybackService {
 
   Future<void> stop() async {
     _loopGeneration++;
+    final nativeStop = _nativeStop;
+    _nativeStop = null;
+    nativeStop?.call();
     _fallbackLoop?.cancel();
     _fallbackLoop = null;
     _loopWatchdog?.cancel();
@@ -64,7 +72,10 @@ final class AlarmPlaybackService {
     }
   }
 
-  Future<AlarmPlaybackResult> _startCustomLoop(String path) async {
+  Future<AlarmPlaybackResult> _startCustomLoop(
+    String path,
+    WindowsAttentionService windowsAttention,
+  ) async {
     final file = File(path);
     if (!await file.exists()) {
       return const AlarmPlaybackResult(
@@ -75,6 +86,14 @@ final class AlarmPlaybackService {
     }
 
     try {
+      if (_canUseNativeWindowsWav(path) &&
+          _startNativeWindowsWavLoop(path, windowsAttention)) {
+        return const AlarmPlaybackResult(
+          started: true,
+          usedCustomAudio: true,
+          message: 'alarme contínuo nativo com WAV personalizado',
+        );
+      }
       await _startLoopingDeviceFile(path);
       return const AlarmPlaybackResult(
         started: true,
@@ -95,6 +114,13 @@ final class AlarmPlaybackService {
   ) async {
     try {
       final file = await _defaultSystemAlarmFile();
+      if (_startNativeWindowsWavLoop(file.path, windowsAttention)) {
+        return const AlarmPlaybackResult(
+          started: true,
+          usedCustomAudio: false,
+          message: 'alarme contínuo nativo do Windows',
+        );
+      }
       await _startLoopingDeviceFile(file.path);
       return const AlarmPlaybackResult(
         started: true,
@@ -195,6 +221,25 @@ final class AlarmPlaybackService {
     return true;
   }
 
+  bool _startNativeWindowsWavLoop(
+    String path,
+    WindowsAttentionService windowsAttention,
+  ) {
+    if (!Platform.isWindows) {
+      return false;
+    }
+    final started = windowsAttention.playWavLoop(path);
+    if (!started) {
+      return false;
+    }
+    _nativeStop = windowsAttention.stopLoopingSound;
+    return true;
+  }
+
+  bool _canUseNativeWindowsWav(String path) {
+    return Platform.isWindows && path.toLowerCase().endsWith('.wav');
+  }
+
   Future<File> _defaultSystemAlarmFile() async {
     final directory = await getTemporaryDirectory();
     final file = File(
@@ -208,7 +253,6 @@ final class AlarmPlaybackService {
   }
 }
 
-@visibleForTesting
 Uint8List generateDefaultAlarmWav({
   int sampleRate = 44100,
   Duration duration = const Duration(seconds: 8),
@@ -237,13 +281,11 @@ Uint8List generateDefaultAlarmWav({
 
   for (var i = 0; i < sampleCount; i++) {
     final t = i / sampleRate;
-    final cycle = t % 1.6;
+    final cycle = t % 1.0;
     final frequency = switch (cycle) {
-      < 0.32 => 880.0,
-      < 0.42 => 0.0,
-      < 0.74 => 660.0,
-      < 0.88 => 0.0,
-      < 1.20 => 1040.0,
+      < 0.42 => 920.0,
+      < 0.50 => 0.0,
+      < 0.92 => 690.0,
       _ => 0.0,
     };
     final fade = _edgeFade(cycle);
@@ -260,12 +302,10 @@ double _edgeFade(double cycle) {
   const fadeSeconds = 0.018;
   final nearestEdge = <double>[
     cycle,
-    (0.32 - cycle).abs(),
     (0.42 - cycle).abs(),
-    (0.74 - cycle).abs(),
-    (0.88 - cycle).abs(),
-    (1.20 - cycle).abs(),
-    (1.60 - cycle).abs(),
+    (0.50 - cycle).abs(),
+    (0.92 - cycle).abs(),
+    (1.00 - cycle).abs(),
   ].reduce(math.min);
   return (nearestEdge / fadeSeconds).clamp(0, 1).toDouble();
 }
