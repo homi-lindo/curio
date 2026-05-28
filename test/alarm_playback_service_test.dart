@@ -11,6 +11,6 @@ void main() {
     expect(ascii.decode(wav.sublist(8, 12)), 'WAVE');
     expect(ascii.decode(wav.sublist(12, 16)), 'fmt ');
     expect(ascii.decode(wav.sublist(36, 40)), 'data');
-    expect(wav.length, greaterThan(44100));
+    expect(wav.length, greaterThan(44100 * 2 * 6));
   });
 }

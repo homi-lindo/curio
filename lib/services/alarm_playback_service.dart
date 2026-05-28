@@ -23,8 +23,12 @@ final class AlarmPlaybackResult {
 
 final class AlarmPlaybackService {
   AudioPlayer? _player;
+  StreamSubscription<void>? _completeSubscription;
+  Timer? _loopWatchdog;
+  Timer? _fallbackLoop;
+  int _loopGeneration = 0;
 
-  bool get isPlaying => _player != null;
+  bool get isPlaying => _player != null || _fallbackLoop != null;
 
   Future<AlarmPlaybackResult> start(
     AlarmSettings settings, {
@@ -44,6 +48,14 @@ final class AlarmPlaybackService {
   }
 
   Future<void> stop() async {
+    _loopGeneration++;
+    _fallbackLoop?.cancel();
+    _fallbackLoop = null;
+    _loopWatchdog?.cancel();
+    _loopWatchdog = null;
+    await _completeSubscription?.cancel();
+    _completeSubscription = null;
+
     final player = _player;
     _player = null;
     if (player != null) {
@@ -63,10 +75,7 @@ final class AlarmPlaybackService {
     }
 
     try {
-      final player = AudioPlayer();
-      await player.setReleaseMode(ReleaseMode.loop);
-      await player.play(DeviceFileSource(path), volume: 1);
-      _player = player;
+      await _startLoopingDeviceFile(path);
       return const AlarmPlaybackResult(
         started: true,
         usedCustomAudio: true,
@@ -86,10 +95,7 @@ final class AlarmPlaybackService {
   ) async {
     try {
       final file = await _defaultSystemAlarmFile();
-      final player = AudioPlayer();
-      await player.setReleaseMode(ReleaseMode.loop);
-      await player.play(DeviceFileSource(file.path), volume: 1);
-      _player = player;
+      await _startLoopingDeviceFile(file.path);
       return const AlarmPlaybackResult(
         started: true,
         usedCustomAudio: false,
@@ -97,16 +103,96 @@ final class AlarmPlaybackService {
       );
     } on Object {
       final fallback = Platform.isWindows
-          ? windowsAttention.playAlarmFallback()
+          ? _startWindowsFallbackLoop(windowsAttention)
           : false;
       return AlarmPlaybackResult(
         started: fallback,
         usedCustomAudio: false,
         message: fallback
-            ? 'áudio contínuo indisponível; fallback do sistema tocou uma vez'
+            ? 'áudio contínuo indisponível; fallback do sistema em loop'
             : 'áudio contínuo indisponível',
       );
     }
+  }
+
+  Future<void> _startLoopingDeviceFile(String path) async {
+    final player = AudioPlayer();
+    final source = DeviceFileSource(path);
+    final generation = ++_loopGeneration;
+    _player = player;
+
+    try {
+      await player.setReleaseMode(ReleaseMode.loop);
+      _completeSubscription = player.onPlayerComplete.listen((_) {
+        unawaited(_restartLoopIfNeeded(player, source, generation));
+      });
+      _loopWatchdog = Timer.periodic(const Duration(seconds: 2), (_) {
+        if (!_isCurrentLoop(player, generation)) {
+          return;
+        }
+        if (player.state != PlayerState.playing) {
+          unawaited(_restartLoopIfNeeded(player, source, generation));
+        }
+      });
+      await player.play(source, volume: 1);
+    } on Object {
+      if (_player == player) {
+        _player = null;
+      }
+      _loopWatchdog?.cancel();
+      _loopWatchdog = null;
+      await _completeSubscription?.cancel();
+      _completeSubscription = null;
+      await player.dispose();
+      rethrow;
+    }
+  }
+
+  Future<void> _restartLoopIfNeeded(
+    AudioPlayer player,
+    Source source,
+    int generation,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!_isCurrentLoop(player, generation) ||
+        player.state == PlayerState.playing) {
+      return;
+    }
+
+    try {
+      await player.seek(Duration.zero);
+      if (_isCurrentLoop(player, generation)) {
+        await player.resume();
+      }
+    } on Object {
+      if (!_isCurrentLoop(player, generation)) {
+        return;
+      }
+      try {
+        await player.stop();
+        if (_isCurrentLoop(player, generation)) {
+          await player.play(source, volume: 1);
+        }
+      } on Object {
+        // The next watchdog tick will try again while the alarm remains active.
+      }
+    }
+  }
+
+  bool _isCurrentLoop(AudioPlayer player, int generation) {
+    return _player == player && _loopGeneration == generation;
+  }
+
+  bool _startWindowsFallbackLoop(WindowsAttentionService windowsAttention) {
+    final firstPlay = windowsAttention.playAlarmFallback();
+    if (!firstPlay) {
+      return false;
+    }
+    _fallbackLoop?.cancel();
+    _fallbackLoop = Timer.periodic(const Duration(milliseconds: 900), (_) {
+      windowsAttention.playAlarmFallback();
+    });
+    return true;
   }
 
   Future<File> _defaultSystemAlarmFile() async {
@@ -125,7 +211,7 @@ final class AlarmPlaybackService {
 @visibleForTesting
 Uint8List generateDefaultAlarmWav({
   int sampleRate = 44100,
-  Duration duration = const Duration(milliseconds: 1600),
+  Duration duration = const Duration(seconds: 8),
 }) {
   final sampleCount = (sampleRate * duration.inMilliseconds / 1000).round();
   const channels = 1;
