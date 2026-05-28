@@ -360,7 +360,7 @@ final class _CalendarOAuthPanel extends StatelessWidget {
         children: <Widget>[
           SectionHeader(
             icon: Icons.event_available_outlined,
-            title: 'Calendários externos',
+            title: 'Importar/exportar calendário',
             action: StatusPill(
               icon: config.hasAnyConfigured
                   ? Icons.verified_user_outlined
@@ -370,9 +370,9 @@ final class _CalendarOAuthPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Google Calendar e Outlook ficam prontos por Client ID público. '
-            'Cada dispositivo autoriza no navegador do sistema e os tokens '
-            'ficam no cofre local do Curió.',
+            'Curió não tem login. Google Calendar e Outlook só entram quando '
+            'você pedir importação ou exportação: o navegador oficial abre, '
+            'a conta logada autoriza e o token é descartado ao fim da operação.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 14),
@@ -381,8 +381,9 @@ final class _CalendarOAuthPanel extends StatelessWidget {
           _CalendarOAuthProviderBlock(client: config.microsoft),
           const SizedBox(height: 6),
           Text(
-            'Sem client secret no app, sem sessão validada no GitHub e com '
-            '.ics preservado como fallback manual.',
+            'O sync entre Windows e Android continua sendo apenas local ou '
+            'self-hosted. OAuth não substitui o servidor opcional nem cria '
+            'conta no Curió.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -427,6 +428,7 @@ final class _CalendarOAuthProviderBlock extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         MetricLine('Status', client.readinessLabel),
+        const MetricLine('Uso', 'importar/exportar sob demanda'),
         MetricLine('Plataforma', client.platformLabel),
         MetricLine('Client ID', client.maskedClientId),
         MetricLine('Redirect', client.redirectUri),

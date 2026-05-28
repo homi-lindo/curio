@@ -41,7 +41,7 @@ Test-GoogleClientId -Value $GoogleWindowsClientId -Name "CURIO_GOOGLE_WINDOWS_CL
 Test-GoogleClientId -Value $GoogleAndroidClientId -Name "CURIO_GOOGLE_ANDROID_CLIENT_ID"
 Test-MicrosoftClientId -Value $MicrosoftClientId
 
-Write-Host "Curio OAuth readiness"
+Write-Host "Curio calendar import/export OAuth readiness"
 Write-Host ""
 Write-Host "Windows dart-defines:"
 Write-Host "--dart-define=CURIO_GOOGLE_WINDOWS_CLIENT_ID=""$GoogleWindowsClientId"""
@@ -55,7 +55,7 @@ Write-Host "--dart-define=CURIO_MICROSOFT_TENANT=""$MicrosoftTenant"""
 Write-Host ""
 Write-Host "Escopos esperados:"
 Write-Host "- Google: https://www.googleapis.com/auth/calendar.events"
-Write-Host "- Microsoft: User.Read, Calendars.ReadWrite, offline_access"
+Write-Host "- Microsoft: User.Read, Calendars.ReadWrite"
 Write-Host ""
 Write-Host "Guias:"
 Write-Host "- docs/calendar-app-registration.md"

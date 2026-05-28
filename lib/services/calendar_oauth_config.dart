@@ -12,7 +12,6 @@ final class CalendarOAuthScopes {
 
   static const microsoftUserRead = 'User.Read';
   static const microsoftCalendarsReadWrite = 'Calendars.ReadWrite';
-  static const microsoftOfflineAccess = 'offline_access';
 }
 
 final class CalendarOAuthClientConfig {
@@ -49,7 +48,7 @@ final class CalendarOAuthClientConfig {
     if (!isConfigured) {
       return 'aguardando Client ID público';
     }
-    return 'pronto para autorização do usuário';
+    return 'pronto para importar/exportar com autorização oficial';
   }
 }
 
@@ -131,7 +130,6 @@ final class CalendarOAuthBuildConfig {
         scopes: const <String>[
           CalendarOAuthScopes.microsoftUserRead,
           CalendarOAuthScopes.microsoftCalendarsReadWrite,
-          CalendarOAuthScopes.microsoftOfflineAccess,
         ],
         registrationGuide:
             'docs/calendar-app-registration.md#microsoft-entra--outlook',

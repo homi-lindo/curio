@@ -37,6 +37,20 @@ void main() {
     expect(runtime.microsoft.maskedClientId, 'não configurado');
   });
 
+  test('configured providers are for calendar import and export only', () {
+    const config = CalendarOAuthBuildConfig(
+      googleWindowsClientId: 'windows-client.apps.googleusercontent.com',
+      googleAndroidClientId: '',
+      microsoftClientId: '00000000-0000-0000-0000-000000000000',
+      microsoftTenant: 'common',
+    );
+
+    final runtime = config.forPlatform(TargetPlatform.windows);
+
+    expect(runtime.google.readinessLabel, contains('importar/exportar'));
+    expect(runtime.microsoft.scopes, isNot(contains('offline_access')));
+  });
+
   test('masks client IDs without hiding their provider identity', () {
     expect(
       maskOAuthClientId('1234567890abcdef.apps.googleusercontent.com'),

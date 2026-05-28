@@ -36,8 +36,8 @@ robustez, rapidez e um visual elegante, sem fluxo comercial.
 - Sincronização opcional por servidor self-hosted em Docker ou endpoint HTTPS
   próprio.
 - Kit self-hosted publicado em release GitHub.
-- Prontidão OAuth para calendários externos: Client IDs públicos por
-  `--dart-define`, UI de status em Sync e cofre local preparado para tokens.
+- Prontidão OAuth apenas para importar/exportar calendários externos: Client
+  IDs públicos por `--dart-define`, UI de status em Sync e sem login no Curió.
 - Testes unitários e E2E Android cobrindo fluxos principais de notas,
   notificações, backup, sync e navegação.
 
@@ -205,8 +205,8 @@ Os artefatos públicos ficam em GitHub Releases:
 - `curio-social-preview.png`: imagem 1280x640 para social preview do GitHub.
 - `docs/calendar-app-registration.md`: roteiro de registro OAuth para Google
   Calendar e Microsoft Graph/Outlook.
-- `docs/calendar-oauth-readiness.md`: roteiro de autorização por
-  usuário/dispositivo e publicação/consentimento.
+- `docs/calendar-oauth-readiness.md`: roteiro de autorização sob demanda para
+  importação/exportação e publicação/consentimento.
 
 Release atual:
 

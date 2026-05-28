@@ -1,9 +1,10 @@
 # Registro do app para calendários Google e Microsoft
 
 Este documento fixa os dados de registro do Curió para a integração direta
-com Google Calendar e Outlook/Microsoft Graph. A troca por arquivo `.ics`
-já funciona sem credenciais; OAuth é necessário apenas para sincronização
-direta com as contas do usuário.
+com Google Calendar e Outlook/Microsoft Graph. OAuth não cria login no Curió e
+não participa do sync entre Windows e Android. Ele serve apenas para importar ou
+exportar calendário quando o usuário pedir. A troca por arquivo `.ics` já
+funciona sem credenciais.
 
 ## Identidade do Curió
 
@@ -150,12 +151,12 @@ Use permissões delegadas, porque o app age em nome do usuário conectado:
 Microsoft Graph / Delegated:
 - User.Read
 - Calendars.ReadWrite
-- offline_access
 ```
 
 `Calendars.ReadWrite` permite criar, ler, atualizar e excluir eventos nos
-calendários do usuário. `offline_access` permite renovar tokens sem pedir login
-em toda abertura.
+calendários do usuário. Não solicite `offline_access` nesta fase: o Curió deve
+autorizar importação/exportação sob demanda e descartar o token ao fim da
+operação.
 
 ## Onde guardar os IDs
 
@@ -163,8 +164,9 @@ Não grave tokens, client secrets ou refresh tokens no repositório. O próximo
 passo de implementação deve guardar:
 
 - client IDs em configuração pública do app ou settings locais;
-- access/refresh tokens no armazenamento seguro já usado pelo Curió;
-- estado de sync por provedor fora das notas visíveis ao usuário.
+- access token apenas em memória durante importação/exportação;
+- estado local de última importação/exportação fora das notas visíveis ao
+  usuário, se necessário.
 
 Template local para os client IDs:
 
@@ -178,7 +180,7 @@ Template local para os client IDs:
   "microsoft": {
     "clientId": "",
     "tenant": "common",
-    "scopes": ["User.Read", "Calendars.ReadWrite", "offline_access"]
+    "scopes": ["User.Read", "Calendars.ReadWrite"]
   }
 }
 ```
@@ -193,8 +195,8 @@ O app já lê esses IDs públicos por `--dart-define`:
 ```
 
 Depois de gerar um build com esses valores, a tela `Sync` mostra a prontidão
-de cada provedor. A autorização validada continua sendo local por usuário e
-dispositivo, via navegador do sistema.
+de cada provedor para importação/exportação. A autorização validada continua
+sendo local e temporária, via navegador oficial do provedor.
 
 ## Decisões de segurança
 
@@ -202,6 +204,8 @@ dispositivo, via navegador do sistema.
 - Usar Authorization Code + PKCE.
 - Não embutir client secret.
 - Solicitar apenas escopos de calendário necessários.
+- Não usar OAuth como login do Curió.
+- Descartar tokens ao final da importação/exportação.
 - Marcar eventos criados pelo Curió com metadados locais/extended properties
   para evitar duplicatas em importações futuras.
 - Manter `.ics` como fallback manual, mesmo depois do OAuth direto.

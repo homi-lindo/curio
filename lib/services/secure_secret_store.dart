@@ -24,28 +24,6 @@ final class SecureSecretStore {
 
     await backend.write(_syncTokenKey, trimmed);
   }
-
-  Future<String> readCalendarRefreshToken(String providerId) async {
-    return await backend.read(_calendarRefreshTokenKey(providerId)) ?? '';
-  }
-
-  Future<void> writeCalendarRefreshToken(
-    String providerId,
-    String token,
-  ) async {
-    final key = _calendarRefreshTokenKey(providerId);
-    final trimmed = token.trim();
-    if (trimmed.isEmpty) {
-      await backend.delete(key);
-      return;
-    }
-
-    await backend.write(key, trimmed);
-  }
-
-  Future<void> deleteCalendarRefreshToken(String providerId) async {
-    await backend.delete(_calendarRefreshTokenKey(providerId));
-  }
 }
 
 final class MethodChannelSecretBackend implements SecretBackend {
@@ -75,11 +53,3 @@ final class MethodChannelSecretBackend implements SecretBackend {
 }
 
 const _syncTokenKey = 'syncToken';
-
-String _calendarRefreshTokenKey(String providerId) {
-  final normalized = providerId.trim().toLowerCase();
-  if (normalized.isEmpty) {
-    throw ArgumentError.value(providerId, 'providerId', 'provider vazio');
-  }
-  return 'calendarOAuth.$normalized.refreshToken';
-}

@@ -1,21 +1,23 @@
-# Prontidão OAuth dos calendários
+# Prontidão OAuth para importar/exportar calendários
 
-Este roteiro cobre as etapas que não podem ser substituídas por um token
-pré-validado dentro do repositório: autorização por usuário/dispositivo e
-publicação/consentimento nos provedores.
+Este roteiro cobre a autorização de terceiros para importar ou exportar eventos
+do Google Calendar e do Outlook/Microsoft 365.
 
-O Curió deve continuar funcionando sem login externo. A troca manual por `.ics`
-permanece como fallback para Google Calendar, Outlook e qualquer calendário
-compatível.
+Curió não tem login próprio. A sincronização entre Windows e Android continua
+sendo local-first e opcionalmente self-hosted. OAuth é apenas uma ponte
+temporária com o calendário externo quando o usuário toca em importar ou
+exportar. A troca manual por `.ics` permanece como fallback para Google
+Calendar, Outlook e qualquer calendário compatível.
 
 ## O que já fica pronto no app
 
 - Client IDs públicos podem entrar por `--dart-define`.
-- A tela `Sync` mostra a prontidão de Google Calendar e Outlook/Microsoft 365.
-- Refresh tokens ficam preparados para o cofre local do Curió, separado do
-  arquivo `lume-sync.json`.
+- A tela `Sync` mostra a prontidão de Google Calendar e Outlook/Microsoft 365
+  para importação/exportação.
 - Nenhum client secret, access token ou refresh token deve ir para o GitHub.
-- A autorização final acontece no navegador do sistema em cada dispositivo.
+- A autorização acontece no navegador oficial do provedor.
+- O access token deve existir apenas em memória durante a operação e ser
+  descartado ao terminar.
 
 ## Build com Client IDs públicos
 
@@ -53,18 +55,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\windows\package-por
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\android\build-release-appbundle.ps1
 ```
 
-## Validação por usuário/dispositivo
+## Validação sob demanda
 
-Quando a sincronização direta for ligada no app:
+Quando a importação/exportação direta for ligada no app:
 
-1. O usuário toca em conectar Google ou Microsoft.
+1. O usuário toca em importar ou exportar via Google/Microsoft.
 2. O Curió abre o navegador do sistema.
 3. O provedor mostra a tela de consentimento cadastrada no console.
 4. O app recebe o authorization code pelo redirect registrado.
 5. O code é trocado por tokens usando Authorization Code + PKCE.
-6. O access token é usado apenas para a chamada atual.
-7. O refresh token fica no cofre local do dispositivo.
-8. Desconectar remove o refresh token local e mantém as notas/notificações.
+6. O access token é usado apenas para ler/criar/atualizar eventos da operação.
+7. O Curió converte os eventos para notas/notificações ou envia os eventos
+   criados a partir das notas/notificações.
+8. O token é descartado. Não existe sessão Curió nem estado de login do app.
 
 Esse fluxo é obrigatório porque Windows e Android são public clients: eles não
 podem provar identidade usando segredo embutido.
@@ -93,9 +96,8 @@ podem provar identidade usando segredo embutido.
 - Permissões delegadas:
   - `User.Read`
   - `Calendars.ReadWrite`
-  - `offline_access`
-- Após alterar permissões, testar login em uma conta pessoal Outlook.com e em
-  uma conta Microsoft 365, se esse público for mantido.
+- Após alterar permissões, testar a tela de consentimento em uma conta pessoal
+  Outlook.com e em uma conta Microsoft 365, se esse público for mantido.
 
 ## Critério de pronto
 
@@ -103,8 +105,9 @@ podem provar identidade usando segredo embutido.
 - O build foi gerado com os `--dart-define` corretos.
 - A tela `Sync` mostra Google e Microsoft como configurados.
 - `.ics` continua exportando/importando notas e notificações.
-- O primeiro login de cada provedor passa pelo navegador do sistema.
-- O logout remove tokens locais sem apagar conteúdo do Curió.
+- Importar/exportar abre a tela oficial do provedor.
+- Nenhum refresh token é persistido pelo Curió.
+- O sync self-hosted continua independente do OAuth.
 
 ## Referências oficiais
 
