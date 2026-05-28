@@ -2,6 +2,9 @@
 param(
     [string]$ProjectRoot = '',
     [string]$OutputRoot = '',
+    [string]$GoogleWindowsClientId = $env:CURIO_GOOGLE_WINDOWS_CLIENT_ID,
+    [string]$MicrosoftClientId = $env:CURIO_MICROSOFT_CLIENT_ID,
+    [string]$MicrosoftTenant = $env:CURIO_MICROSOFT_TENANT,
     [switch]$SkipBuild,
     [switch]$NoZip
 )
@@ -33,6 +36,12 @@ function ConvertTo-SafeName([string]$Value) {
     return ($Value -replace '[^a-zA-Z0-9._-]', '-')
 }
 
+function Add-DartDefine([System.Collections.Generic.List[string]]$Args, [string]$Name, [string]$Value) {
+    if (-not [string]::IsNullOrWhiteSpace($Value)) {
+        $Args.Add("--dart-define=$Name=$Value")
+    }
+}
+
 Push-Location $ProjectRoot
 try {
     $flutter = Join-Path (Resolve-Path (Join-Path $ProjectRoot '..\..\.tools\flutter\bin')).Path 'flutter.bat'
@@ -41,7 +50,13 @@ try {
     }
 
     if (-not $SkipBuild) {
-        & $flutter build windows --release --no-pub
+        $buildArgs = [System.Collections.Generic.List[string]]::new()
+        @('build', 'windows', '--release', '--no-pub') | ForEach-Object { $buildArgs.Add($_) }
+        Add-DartDefine -Args $buildArgs -Name 'CURIO_GOOGLE_WINDOWS_CLIENT_ID' -Value $GoogleWindowsClientId
+        Add-DartDefine -Args $buildArgs -Name 'CURIO_MICROSOFT_CLIENT_ID' -Value $MicrosoftClientId
+        Add-DartDefine -Args $buildArgs -Name 'CURIO_MICROSOFT_TENANT' -Value $MicrosoftTenant
+
+        & $flutter @buildArgs
         if ($LASTEXITCODE -ne 0) {
             throw "flutter build windows failed with exit code $LASTEXITCODE"
         }

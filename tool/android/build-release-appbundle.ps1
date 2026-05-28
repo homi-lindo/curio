@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$ProjectRoot = '',
-    [string]$Flutter = ''
+    [string]$Flutter = '',
+    [string]$GoogleAndroidClientId = $env:CURIO_GOOGLE_ANDROID_CLIENT_ID,
+    [string]$MicrosoftClientId = $env:CURIO_MICROSOFT_CLIENT_ID,
+    [string]$MicrosoftTenant = $env:CURIO_MICROSOFT_TENANT
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,10 +29,22 @@ if (Test-Path -LiteralPath $successPath) {
     Remove-Item -LiteralPath $successPath -Force
 }
 
+function Add-DartDefine([System.Collections.Generic.List[string]]$Args, [string]$Name, [string]$Value) {
+    if (-not [string]::IsNullOrWhiteSpace($Value)) {
+        $Args.Add("--dart-define=$Name=$Value")
+    }
+}
+
 Push-Location $ProjectRoot
 try {
     Write-Host "Running Flutter release App Bundle build..."
-    & $Flutter build appbundle --release --no-pub 2>&1 | Tee-Object -FilePath $logPath
+    $buildArgs = [System.Collections.Generic.List[string]]::new()
+    @('build', 'appbundle', '--release', '--no-pub') | ForEach-Object { $buildArgs.Add($_) }
+    Add-DartDefine -Args $buildArgs -Name 'CURIO_GOOGLE_ANDROID_CLIENT_ID' -Value $GoogleAndroidClientId
+    Add-DartDefine -Args $buildArgs -Name 'CURIO_MICROSOFT_CLIENT_ID' -Value $MicrosoftClientId
+    Add-DartDefine -Args $buildArgs -Name 'CURIO_MICROSOFT_TENANT' -Value $MicrosoftTenant
+
+    & $Flutter @buildArgs 2>&1 | Tee-Object -FilePath $logPath
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
         throw "flutter build appbundle failed with exit code $exitCode. See $logPath"
@@ -49,7 +64,7 @@ try {
     $hash = (Get-FileHash -LiteralPath $aabPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $marker = [ordered]@{
         builtAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-        command = 'flutter build appbundle --release --no-pub'
+        command = "flutter $($buildArgs -join ' ')"
         artifact = 'build\app\outputs\bundle\release\app-release.aab'
         sizeBytes = $artifact.Length
         sha256 = $hash

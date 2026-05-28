@@ -83,6 +83,25 @@ void main() {
     expect(loaded.authToken, 'safe-token');
     expect(archived, isNotEmpty);
   });
+
+  test('secure store keeps calendar refresh tokens by provider', () async {
+    final secrets = _MemorySecretBackend();
+    final store = SecureSecretStore(backend: secrets);
+
+    await store.writeCalendarRefreshToken('google', ' google-refresh ');
+    await store.writeCalendarRefreshToken('microsoft', 'microsoft-refresh');
+
+    expect(await store.readCalendarRefreshToken('google'), 'google-refresh');
+    expect(
+      await store.readCalendarRefreshToken('microsoft'),
+      'microsoft-refresh',
+    );
+    expect(await secrets.read('calendarOAuth.google.refreshToken'), isNotNull);
+
+    await store.deleteCalendarRefreshToken('google');
+    expect(await store.readCalendarRefreshToken('google'), isEmpty);
+    expect(await store.readCalendarRefreshToken('microsoft'), isNotEmpty);
+  });
 }
 
 final class _MemorySecretBackend implements SecretBackend {

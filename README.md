@@ -36,6 +36,8 @@ robustez, rapidez e um visual elegante, sem fluxo comercial.
 - Sincronização opcional por servidor self-hosted em Docker ou endpoint HTTPS
   próprio.
 - Kit self-hosted publicado em release GitHub.
+- Prontidão OAuth para calendários externos: Client IDs públicos por
+  `--dart-define`, UI de status em Sync e cofre local preparado para tokens.
 - Testes unitários e E2E Android cobrindo fluxos principais de notas,
   notificações, backup, sync e navegação.
 
@@ -91,6 +93,17 @@ Para build Android de teste:
 ```powershell
 ..\..\.tools\flutter\bin\flutter.bat build apk --release --no-pub
 ```
+
+Para conferir a configuração pública de OAuth dos calendários:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\calendar\check-oauth-readiness.ps1
+```
+
+Os scripts `tool\windows\package-portable.ps1` e
+`tool\android\build-release-appbundle.ps1` repassam automaticamente as variáveis
+`CURIO_GOOGLE_WINDOWS_CLIENT_ID`, `CURIO_GOOGLE_ANDROID_CLIENT_ID`,
+`CURIO_MICROSOFT_CLIENT_ID` e `CURIO_MICROSOFT_TENANT` quando elas existirem.
 
 Para gerar o App Bundle da Play:
 
@@ -192,6 +205,8 @@ Os artefatos públicos ficam em GitHub Releases:
 - `curio-social-preview.png`: imagem 1280x640 para social preview do GitHub.
 - `docs/calendar-app-registration.md`: roteiro de registro OAuth para Google
   Calendar e Microsoft Graph/Outlook.
+- `docs/calendar-oauth-readiness.md`: roteiro de autorização por
+  usuário/dispositivo e publicação/consentimento.
 
 Release atual:
 

@@ -5,6 +5,7 @@ import 'package:lume_core/sync/sync_adapter.dart';
 
 import '../../services/appearance_settings_store.dart';
 import '../../services/alarm_settings_store.dart';
+import '../../services/calendar_oauth_config.dart';
 import '../../services/local_sync_sidecar.dart';
 import '../../services/sync_settings_store.dart';
 import '../../theme/curio_theme.dart';
@@ -78,6 +79,8 @@ final class SyncView extends StatelessWidget {
     final result = lastResult;
     final lastSyncedAt = settings.lastSyncedAtUtc;
     final sidecarRunning = sidecarState != null;
+    final calendarOAuth = const CalendarOAuthBuildConfig.fromEnvironment()
+        .forPlatform(defaultTargetPlatform);
     final serverHint = kDebugMode
         ? 'http://192.168.0.10:8787'
         : 'https://sync.seu-dominio.com';
@@ -112,6 +115,8 @@ final class SyncView extends StatelessWidget {
             onTestAudio: onTestAlarmAudio,
             onStopAudio: onStopAlarmAudio,
           ),
+          const SizedBox(height: 14),
+          _CalendarOAuthPanel(config: calendarOAuth),
           const SizedBox(height: 14),
           Surface(
             child: Column(
@@ -334,6 +339,100 @@ final class SyncView extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+final class _CalendarOAuthPanel extends StatelessWidget {
+  const _CalendarOAuthPanel({required this.config});
+
+  final CalendarOAuthRuntimeConfig config;
+
+  @override
+  Widget build(BuildContext context) {
+    final configuredLabel = config.hasAnyConfigured
+        ? '${config.configuredCount}/2 IDs'
+        : 'aguardando Client IDs';
+
+    return Surface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SectionHeader(
+            icon: Icons.event_available_outlined,
+            title: 'Calendários externos',
+            action: StatusPill(
+              icon: config.hasAnyConfigured
+                  ? Icons.verified_user_outlined
+                  : Icons.pending_actions_outlined,
+              label: configuredLabel,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Google Calendar e Outlook ficam prontos por Client ID público. '
+            'Cada dispositivo autoriza no navegador do sistema e os tokens '
+            'ficam no cofre local do Curió.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 14),
+          _CalendarOAuthProviderBlock(client: config.google),
+          const Divider(height: 24),
+          _CalendarOAuthProviderBlock(client: config.microsoft),
+          const SizedBox(height: 6),
+          Text(
+            'Sem client secret no app, sem sessão validada no GitHub e com '
+            '.ics preservado como fallback manual.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _CalendarOAuthProviderBlock extends StatelessWidget {
+  const _CalendarOAuthProviderBlock({required this.client});
+
+  final CalendarOAuthClientConfig client;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (client.provider) {
+      CalendarOAuthProvider.google => Icons.calendar_month_outlined,
+      CalendarOAuthProvider.microsoft => Icons.mail_outline,
+    };
+    final statusIcon = client.isConfigured
+        ? Icons.check_circle_outline
+        : Icons.info_outline;
+    final statusLabel = client.isConfigured ? 'configurado' : 'sem ID';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(icon, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                client.name,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+              ),
+            ),
+            StatusPill(icon: statusIcon, label: statusLabel),
+          ],
+        ),
+        const SizedBox(height: 10),
+        MetricLine('Status', client.readinessLabel),
+        MetricLine('Plataforma', client.platformLabel),
+        MetricLine('Client ID', client.maskedClientId),
+        MetricLine('Redirect', client.redirectUri),
+        MetricLine('Escopos', client.scopes.join(', ')),
+        MetricLine('Guia', client.registrationGuide),
+      ],
     );
   }
 }

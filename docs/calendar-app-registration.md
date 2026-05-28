@@ -183,6 +183,19 @@ Template local para os client IDs:
 }
 ```
 
+O app já lê esses IDs públicos por `--dart-define`:
+
+```powershell
+--dart-define=CURIO_GOOGLE_WINDOWS_CLIENT_ID="..."
+--dart-define=CURIO_GOOGLE_ANDROID_CLIENT_ID="..."
+--dart-define=CURIO_MICROSOFT_CLIENT_ID="..."
+--dart-define=CURIO_MICROSOFT_TENANT="common"
+```
+
+Depois de gerar um build com esses valores, a tela `Sync` mostra a prontidão
+de cada provedor. A autorização validada continua sendo local por usuário e
+dispositivo, via navegador do sistema.
+
 ## Decisões de segurança
 
 - Usar navegador do sistema, não WebView embutida.
