@@ -190,6 +190,8 @@ Os artefatos públicos ficam em GitHub Releases:
 - `curio-android-play-store.aab`: bundle para Play Console.
 - `curio-self-host.zip`: kit Docker/Compose do servidor opcional.
 - `curio-social-preview.png`: imagem 1280x640 para social preview do GitHub.
+- `docs/calendar-app-registration.md`: roteiro de registro OAuth para Google
+  Calendar e Microsoft Graph/Outlook.
 
 Release atual:
 
