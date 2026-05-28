@@ -1079,16 +1079,17 @@ final class _CurioAppState extends State<CurioApp> {
   }
 
   Future<void> _applyCalendarImport(CalendarIcsImport import) async {
-    var snapshot = _snapshot;
-    if (snapshot == null) {
+    final currentSnapshot = _snapshot;
+    if (currentSnapshot == null) {
       return;
     }
+    var snapshot = currentSnapshot;
 
     final nowUtc = DateTime.now().toUtc();
-    final timedFutureEvents = import.events.where(
-      (event) => !event.allDay && event.startsAtUtc.isAfter(nowUtc),
-    );
-    if (timedFutureEvents.isNotEmpty) {
+    final notificationEvents = import.events
+        .where((event) => _calendarEventCanCreateNotification(event, nowUtc))
+        .toList();
+    if (notificationEvents.isNotEmpty) {
       final authorized = await _ensureNotificationCreationAuthorization();
       if (!authorized) {
         _log('agenda não importada: autorização de notificação pendente');
@@ -1113,15 +1114,24 @@ final class _CurioAppState extends State<CurioApp> {
         notesChanged++;
       }
 
-      if (event.allDay || !event.startsAtUtc.isAfter(nowUtc)) {
+      if (!_calendarEventCanCreateNotification(event, nowUtc)) {
         continue;
+      }
+
+      final intentId = _calendarEventReminderId(event);
+      final notificationUtc = _calendarEventNotificationUtc(event, nowUtc);
+      final existingRecord = snapshot.scheduledNotifications
+          .where((record) => record.reminderIntentId == intentId)
+          .firstOrNull;
+      if (existingRecord != null) {
+        snapshot = await _withoutNotificationRecord(snapshot, existingRecord);
       }
 
       final alreadyExists = snapshot.scheduledNotifications.any(
         (record) =>
             record.title.trim() == event.title.trim() &&
             record.scheduledForUtc
-                    .difference(event.startsAtUtc)
+                    .difference(notificationUtc)
                     .abs()
                     .inMinutes ==
                 0,
@@ -1130,12 +1140,11 @@ final class _CurioAppState extends State<CurioApp> {
         continue;
       }
 
-      final intent = ReminderIntent.oneShot(
-        id: newId('ics'),
-        ownerId: note.note.id,
-        ownerType: ReminderOwnerType.note,
-        instantUtc: event.startsAtUtc,
-        updatedAtUtc: nowUtc,
+      final intent = _calendarImportReminderIntent(
+        event: event,
+        noteId: note.note.id,
+        notificationUtc: notificationUtc,
+        nowUtc: nowUtc,
         timeZone: widget.notifications.localTimeZoneId,
       );
       final result = await widget.notifications.scheduleReminder(
@@ -2004,10 +2013,113 @@ _ImportedNoteResult _upsertImportedDailyNote(
 String _calendarEventMarkdown(CalendarIcsEvent event) {
   final label = event.allDay ? 'dia todo' : formatLocalTime(event.startsAtUtc);
   final description = event.description.trim();
-  if (description.isEmpty) {
-    return '- $label · ${event.title}';
+  final buffer = StringBuffer('- $label · ${event.title}');
+  if (description.isNotEmpty) {
+    buffer.write(': $description');
   }
-  return '- $label · ${event.title}: $description';
+  if (!event.allDay && event.endsAtUtc != null) {
+    buffer.write('\n  - fim: ${formatLocalTime(event.endsAtUtc!)}');
+  }
+  if (event.alarmAtUtc != null) {
+    buffer.write('\n  - lembrete: ${formatLocalDateTime(event.alarmAtUtc!)}');
+  }
+  if (event.recurrenceRule.trim().isNotEmpty) {
+    final supported = event.supportedRecurrence;
+    buffer.write(
+      '\n  - recorrência: ${supported?.label ?? event.recurrenceRule.trim()}',
+    );
+  }
+  if (event.timeZoneId.trim().isNotEmpty) {
+    buffer.write('\n  - timezone: ${event.timeZoneId.trim()}');
+  }
+  return buffer.toString();
+}
+
+bool _calendarEventCanCreateNotification(
+  CalendarIcsEvent event,
+  DateTime nowUtc,
+) {
+  if (event.allDay) {
+    return false;
+  }
+  if (event.supportedRecurrence != null) {
+    return true;
+  }
+  return _calendarEventNotificationUtc(event, nowUtc).isAfter(nowUtc);
+}
+
+DateTime _calendarEventNotificationUtc(
+  CalendarIcsEvent event,
+  DateTime nowUtc,
+) {
+  final alarmAt = event.alarmAtUtc;
+  if (alarmAt != null && alarmAt.isAfter(nowUtc)) {
+    return alarmAt;
+  }
+  return event.startsAtUtc;
+}
+
+ReminderIntent _calendarImportReminderIntent({
+  required CalendarIcsEvent event,
+  required String noteId,
+  required DateTime notificationUtc,
+  required DateTime nowUtc,
+  required String timeZone,
+}) {
+  final recurrence = event.supportedRecurrence;
+  final intentId = _calendarEventReminderId(event);
+  if (recurrence == null) {
+    return ReminderIntent.oneShot(
+      id: intentId,
+      ownerId: noteId,
+      ownerType: ReminderOwnerType.note,
+      instantUtc: notificationUtc,
+      updatedAtUtc: nowUtc,
+      timeZone: timeZone,
+    );
+  }
+
+  final recurringLocal = (event.alarmAtUtc ?? event.startsAtUtc).toLocal();
+  final localTime = LocalClockTime(
+    hour: recurringLocal.hour,
+    minute: recurringLocal.minute,
+  );
+  return switch (recurrence.kind) {
+    CalendarIcsRecurrenceKind.daily => ReminderIntent.daily(
+      id: intentId,
+      ownerId: noteId,
+      ownerType: ReminderOwnerType.note,
+      localTime: localTime,
+      timeZone: timeZone,
+      updatedAtUtc: nowUtc,
+    ),
+    CalendarIcsRecurrenceKind.weekly => ReminderIntent.weekly(
+      id: intentId,
+      ownerId: noteId,
+      ownerType: ReminderOwnerType.note,
+      localTime: localTime,
+      timeZone: timeZone,
+      anchorLocalDate: recurringLocal,
+      byWeekday: recurrence.weekday ?? recurringLocal.weekday,
+      updatedAtUtc: nowUtc,
+    ),
+  };
+}
+
+String _calendarEventReminderId(CalendarIcsEvent event) {
+  final source = event.uid.trim().isEmpty
+      ? '${event.title}|${event.startsAtUtc.toUtc().toIso8601String()}'
+      : event.uid.trim();
+  return 'ics-${_stableHex(source)}';
+}
+
+String _stableHex(String value) {
+  var hash = 0x811c9dc5;
+  for (final codeUnit in value.codeUnits) {
+    hash ^= codeUnit;
+    hash = (hash * 0x01000193) & 0xffffffff;
+  }
+  return hash.toRadixString(16).padLeft(8, '0');
 }
 
 String _backupFileTimestamp(DateTime value) {

@@ -173,7 +173,9 @@ final class SyncView extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(
                   'Gera um TXT legível por dia, com bloco de restauração '
-                  'para notas e notificações.',
+                  'para notas e notificações. O .ics troca dados com '
+                  'Outlook/Google e preserva horário, alarme e recorrência '
+                  'diária/semanal simples.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),

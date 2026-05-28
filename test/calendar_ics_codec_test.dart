@@ -13,11 +13,16 @@ void main() {
     expect(ics, contains('BEGIN:VCALENDAR'));
     expect(ics, contains('SUMMARY:Diário - 22/05/2026'));
     expect(ics, contains('DTSTART;VALUE=DATE:20260522'));
+    expect(ics, contains('DTEND;VALUE=DATE:20260523'));
     expect(ics, contains('SUMMARY:Enviar relatório'));
     expect(ics, contains('DTSTART:20260522T154200Z'));
+    expect(ics, contains('DTEND:20260522T155700Z'));
+    expect(ics, contains('X-CURIO-TIMEZONE:America/Sao_Paulo'));
+    expect(ics, contains('BEGIN:VALARM'));
+    expect(ics, contains('TRIGGER:PT0S'));
   });
 
-  test('imports timed and all-day ICS events', () {
+  test('imports timed, all-day, alarm and recurring ICS events', () {
     const ics = '''
 BEGIN:VCALENDAR
 VERSION:2.0
@@ -32,19 +37,44 @@ UID:evento-2
 SUMMARY:Dia livre
 DTSTART;VALUE=DATE:20260523
 END:VEVENT
+BEGIN:VEVENT
+UID:evento-3
+SUMMARY:Revisão semanal
+DESCRIPTION:Rotina de sexta
+DTSTART;TZID=America/Sao_Paulo:20260522T154200
+DTEND;TZID=America/Sao_Paulo:20260522T164200
+RRULE:FREQ=WEEKLY;BYDAY=FR
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Revisão semanal
+TRIGGER:-PT10M
+END:VALARM
+END:VEVENT
 END:VCALENDAR
 ''';
 
     final imported = const CalendarIcsCodec().decode(ics);
 
-    expect(imported.events, hasLength(2));
+    expect(imported.events, hasLength(3));
     expect(imported.events.first.title, 'Reunião Google');
     expect(
       imported.events.first.startsAtUtc,
       DateTime.utc(2026, 5, 22, 15, 42),
     );
     expect(imported.events.first.allDay, isFalse);
-    expect(imported.events.last.allDay, isTrue);
+    expect(imported.events[1].allDay, isTrue);
+    final recurring = imported.events[2];
+    expect(recurring.title, 'Revisão semanal');
+    expect(recurring.startsAtUtc, DateTime.utc(2026, 5, 22, 18, 42));
+    expect(recurring.endsAtUtc, DateTime.utc(2026, 5, 22, 19, 42));
+    expect(recurring.alarmTrigger, const Duration(minutes: -10));
+    expect(recurring.alarmAtUtc, DateTime.utc(2026, 5, 22, 18, 32));
+    expect(recurring.timeZoneId, 'America/Sao_Paulo');
+    expect(
+      recurring.supportedRecurrence?.kind,
+      CalendarIcsRecurrenceKind.weekly,
+    );
+    expect(recurring.supportedRecurrence?.weekday, DateTime.friday);
   });
 }
 

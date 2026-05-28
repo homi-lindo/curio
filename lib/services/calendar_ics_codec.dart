@@ -1,16 +1,24 @@
 import 'package:lume_core/domain/app_snapshot.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 
 final class CalendarIcsCodec {
   const CalendarIcsCodec();
 
   String encode(AppSnapshot snapshot, {DateTime? generatedAtUtc}) {
     final generated = generatedAtUtc ?? DateTime.now().toUtc();
-    final buffer = StringBuffer()
-      ..writeln('BEGIN:VCALENDAR')
-      ..writeln('VERSION:2.0')
-      ..writeln('PRODID:-//Curio//Agenda//PT-BR')
-      ..writeln('CALSCALE:GREGORIAN')
-      ..writeln('METHOD:PUBLISH');
+    final calendarTimeZone = snapshot.scheduledNotifications
+        .map((record) => record.scheduledTimeZone.trim())
+        .where((timeZone) => timeZone.isNotEmpty)
+        .firstOrNull;
+    final buffer = StringBuffer();
+    _writeLine(buffer, 'BEGIN:VCALENDAR');
+    _writeLine(buffer, 'VERSION:2.0');
+    _writeLine(buffer, 'PRODID:-//Curio//Agenda//PT-BR');
+    _writeLine(buffer, 'CALSCALE:GREGORIAN');
+    _writeLine(buffer, 'METHOD:PUBLISH');
+    _writeLine(buffer, 'X-WR-CALNAME:Curio');
+    _writeLine(buffer, 'X-WR-TIMEZONE:${calendarTimeZone ?? 'UTC'}');
 
     for (final note in snapshot.notes) {
       final date = _dailyNoteDate(note);
@@ -41,11 +49,14 @@ final class CalendarIcsCodec {
             : record.title.trim(),
         description: record.body,
         startsAtUtc: record.scheduledForUtc,
+        endsAtUtc: record.scheduledForUtc.add(const Duration(minutes: 15)),
         curioType: 'NOTIFICATION',
+        timeZoneId: record.scheduledTimeZone,
+        alarmTrigger: Duration.zero,
       );
     }
 
-    buffer.writeln('END:VCALENDAR');
+    _writeLine(buffer, 'END:VCALENDAR');
     return buffer.toString();
   }
 
@@ -92,21 +103,54 @@ final class CalendarIcsCodec {
     required String description,
     required String curioType,
     DateTime? startsAtUtc,
+    DateTime? endsAtUtc,
     DateTime? allDayDate,
+    String timeZoneId = '',
+    String recurrenceRule = '',
+    Duration? alarmTrigger,
   }) {
-    buffer
-      ..writeln('BEGIN:VEVENT')
-      ..writeln('UID:${_escapeText(uid)}')
-      ..writeln('DTSTAMP:${_formatUtc(generatedAtUtc)}')
-      ..writeln('SUMMARY:${_escapeText(summary)}')
-      ..writeln('DESCRIPTION:${_escapeText(description)}')
-      ..writeln('X-CURIO-TYPE:$curioType');
-    if (allDayDate != null) {
-      buffer.writeln('DTSTART;VALUE=DATE:${_formatDate(allDayDate)}');
-    } else {
-      buffer.writeln('DTSTART:${_formatUtc(startsAtUtc!.toUtc())}');
+    _writeLine(buffer, 'BEGIN:VEVENT');
+    _writeLine(buffer, 'UID:${_escapeText(uid)}');
+    _writeLine(buffer, 'DTSTAMP:${_formatUtc(generatedAtUtc)}');
+    _writeLine(buffer, 'CREATED:${_formatUtc(generatedAtUtc)}');
+    _writeLine(buffer, 'LAST-MODIFIED:${_formatUtc(generatedAtUtc)}');
+    _writeLine(buffer, 'SEQUENCE:0');
+    _writeLine(buffer, 'STATUS:CONFIRMED');
+    _writeLine(buffer, 'SUMMARY:${_escapeText(summary)}');
+    _writeLine(buffer, 'DESCRIPTION:${_escapeText(description)}');
+    _writeLine(buffer, 'X-CURIO-TYPE:$curioType');
+    if (timeZoneId.trim().isNotEmpty) {
+      _writeLine(buffer, 'X-CURIO-TIMEZONE:${_escapeText(timeZoneId.trim())}');
     }
-    buffer.writeln('END:VEVENT');
+    if (allDayDate != null) {
+      _writeLine(buffer, 'DTSTART;VALUE=DATE:${_formatDate(allDayDate)}');
+      _writeLine(
+        buffer,
+        'DTEND;VALUE=DATE:${_formatDate(allDayDate.add(const Duration(days: 1)))}',
+      );
+      _writeLine(buffer, 'TRANSP:TRANSPARENT');
+    } else {
+      _writeLine(buffer, 'DTSTART:${_formatUtc(startsAtUtc!.toUtc())}');
+      _writeLine(
+        buffer,
+        'DTEND:${_formatUtc((endsAtUtc ?? startsAtUtc.add(const Duration(minutes: 15))).toUtc())}',
+      );
+      _writeLine(buffer, 'TRANSP:OPAQUE');
+    }
+    if (recurrenceRule.trim().isNotEmpty) {
+      _writeLine(buffer, 'RRULE:${recurrenceRule.trim()}');
+    }
+    if (alarmTrigger != null) {
+      _writeLine(buffer, 'BEGIN:VALARM');
+      _writeLine(buffer, 'ACTION:DISPLAY');
+      _writeLine(
+        buffer,
+        'DESCRIPTION:${_escapeText(summary.trim().isEmpty ? 'Notificação' : summary.trim())}',
+      );
+      _writeLine(buffer, 'TRIGGER:${_formatDuration(alarmTrigger)}');
+      _writeLine(buffer, 'END:VALARM');
+    }
+    _writeLine(buffer, 'END:VEVENT');
   }
 }
 
@@ -122,16 +166,92 @@ final class CalendarIcsEvent {
     required this.title,
     required this.description,
     required this.startsAtUtc,
+    this.endsAtUtc,
     required this.allDay,
     required this.curioType,
+    this.timeZoneId = '',
+    this.recurrenceRule = '',
+    this.alarmTrigger,
   });
 
   final String uid;
   final String title;
   final String description;
   final DateTime startsAtUtc;
+  final DateTime? endsAtUtc;
   final bool allDay;
   final String curioType;
+  final String timeZoneId;
+  final String recurrenceRule;
+  final Duration? alarmTrigger;
+
+  DateTime? get alarmAtUtc {
+    final trigger = alarmTrigger;
+    if (trigger == null) {
+      return null;
+    }
+    return startsAtUtc.add(trigger).toUtc();
+  }
+
+  CalendarIcsRecurrence? get supportedRecurrence {
+    return CalendarIcsRecurrence.tryParse(recurrenceRule, startsAtUtc);
+  }
+}
+
+enum CalendarIcsRecurrenceKind { daily, weekly }
+
+final class CalendarIcsRecurrence {
+  const CalendarIcsRecurrence({required this.kind, this.weekday});
+
+  static CalendarIcsRecurrence? tryParse(String rule, DateTime startsAtUtc) {
+    final fields = _rruleFields(rule);
+    final freq = fields['FREQ']?.toUpperCase();
+    final interval = int.tryParse(fields['INTERVAL'] ?? '1') ?? 1;
+    final isOpenEnded =
+        !fields.containsKey('COUNT') && !fields.containsKey('UNTIL');
+    if (freq == null || interval != 1 || !isOpenEnded) {
+      return null;
+    }
+
+    if (freq == 'DAILY') {
+      return const CalendarIcsRecurrence(kind: CalendarIcsRecurrenceKind.daily);
+    }
+
+    if (freq == 'WEEKLY') {
+      final byDay = fields['BYDAY'];
+      if (byDay == null || byDay.trim().isEmpty) {
+        return CalendarIcsRecurrence(
+          kind: CalendarIcsRecurrenceKind.weekly,
+          weekday: startsAtUtc.toLocal().weekday,
+        );
+      }
+
+      final days = byDay
+          .split(',')
+          .map((value) => _weekdayFromRRule(value.trim()))
+          .whereType<int>()
+          .toList();
+      if (days.length != 1) {
+        return null;
+      }
+      return CalendarIcsRecurrence(
+        kind: CalendarIcsRecurrenceKind.weekly,
+        weekday: days.single,
+      );
+    }
+
+    return null;
+  }
+
+  final CalendarIcsRecurrenceKind kind;
+  final int? weekday;
+
+  String get label {
+    return switch (kind) {
+      CalendarIcsRecurrenceKind.daily => 'diária',
+      CalendarIcsRecurrenceKind.weekly => 'semanal',
+    };
+  }
 }
 
 final class CalendarIcsException implements Exception {
@@ -193,18 +313,46 @@ CalendarIcsEvent? _eventFromProperties(List<_IcsProperty> properties) {
   }
 
   final allDay = dtStart.parameters.toUpperCase().contains('VALUE=DATE');
-  final startsAt = allDay
-      ? _parseDate(dtStart.value)
-      : _parseDateTime(dtStart.value);
+  final startsAt = allDay ? _parseDate(dtStart.value) : _parseDateTime(dtStart);
+  final dtEnd = properties
+      .where((property) => property.name == 'DTEND')
+      .firstOrNull;
+  final duration = properties
+      .where((property) => property.name == 'DURATION')
+      .map((property) => _parseDuration(property.value))
+      .firstOrNull;
+  final endsAt = dtEnd == null
+      ? duration == null
+            ? null
+            : startsAt.add(duration)
+      : dtEnd.parameters.toUpperCase().contains('VALUE=DATE')
+      ? _parseDate(dtEnd.value)
+      : _parseDateTime(dtEnd);
   final title = _unescapeText(value('SUMMARY') ?? 'Evento importado').trim();
+  final timeZoneId =
+      _parameterValue(dtStart.parameters, 'TZID') ??
+      _unescapeText(value('X-CURIO-TIMEZONE') ?? '');
+  final recurrenceRule = value('RRULE')?.trim() ?? '';
+  final triggerProperty = properties
+      .where((property) => property.name == 'TRIGGER')
+      .firstOrNull;
+  final alarmTrigger = _alarmTriggerRelativeToStart(
+    startsAt: startsAt,
+    endsAt: endsAt,
+    trigger: triggerProperty,
+  );
 
   return CalendarIcsEvent(
     uid: _unescapeText(value('UID') ?? title),
     title: title.isEmpty ? 'Evento importado' : title,
     description: _unescapeText(value('DESCRIPTION') ?? ''),
     startsAtUtc: startsAt.toUtc(),
+    endsAtUtc: endsAt?.toUtc(),
     allDay: allDay,
     curioType: (value('X-CURIO-TYPE') ?? '').toUpperCase(),
+    timeZoneId: timeZoneId,
+    recurrenceRule: recurrenceRule,
+    alarmTrigger: alarmTrigger,
   );
 }
 
@@ -220,29 +368,38 @@ DateTime _parseDate(String value) {
   );
 }
 
-DateTime _parseDateTime(String value) {
-  final compact = value.trim();
+DateTime _parseDateTime(_IcsProperty property) {
+  final compact = property.value.trim();
   if (compact.length < 15) {
     throw const CalendarIcsException('Data/hora inválida no .ics.');
   }
-  final dateTime = DateTime(
-    int.parse(compact.substring(0, 4)),
-    int.parse(compact.substring(4, 6)),
-    int.parse(compact.substring(6, 8)),
-    int.parse(compact.substring(9, 11)),
-    int.parse(compact.substring(11, 13)),
-    int.parse(compact.substring(13, 15)),
-  );
-  return compact.endsWith('Z')
-      ? DateTime.utc(
-          dateTime.year,
-          dateTime.month,
-          dateTime.day,
-          dateTime.hour,
-          dateTime.minute,
-          dateTime.second,
-        )
-      : dateTime.toUtc();
+  final year = int.parse(compact.substring(0, 4));
+  final month = int.parse(compact.substring(4, 6));
+  final day = int.parse(compact.substring(6, 8));
+  final hour = int.parse(compact.substring(9, 11));
+  final minute = int.parse(compact.substring(11, 13));
+  final second = int.parse(compact.substring(13, 15));
+  if (compact.endsWith('Z')) {
+    return DateTime.utc(year, month, day, hour, minute, second);
+  }
+
+  final timeZoneId = _parameterValue(property.parameters, 'TZID');
+  if (timeZoneId != null && timeZoneId.trim().isNotEmpty) {
+    final resolved = _dateTimeInTimeZone(
+      timeZoneId.trim(),
+      year: year,
+      month: month,
+      day: day,
+      hour: hour,
+      minute: minute,
+      second: second,
+    );
+    if (resolved != null) {
+      return resolved;
+    }
+  }
+
+  return DateTime(year, month, day, hour, minute, second).toUtc();
 }
 
 String _formatUtc(DateTime value) {
@@ -259,6 +416,194 @@ String _formatDate(DateTime value) {
   return '${value.year.toString().padLeft(4, '0')}'
       '${value.month.toString().padLeft(2, '0')}'
       '${value.day.toString().padLeft(2, '0')}';
+}
+
+String _formatDuration(Duration value) {
+  final negative = value.inMicroseconds < 0;
+  final positive = Duration(microseconds: value.inMicroseconds.abs());
+  final days = positive.inDays;
+  final hours = positive.inHours.remainder(24);
+  final minutes = positive.inMinutes.remainder(60);
+  final seconds = positive.inSeconds.remainder(60);
+  final buffer = StringBuffer(negative ? '-' : '');
+  buffer.write('P');
+  if (days > 0) {
+    buffer.write('${days}D');
+  }
+  if (hours > 0 || minutes > 0 || seconds > 0 || days == 0) {
+    buffer.write('T');
+    if (hours > 0) {
+      buffer.write('${hours}H');
+    }
+    if (minutes > 0) {
+      buffer.write('${minutes}M');
+    }
+    if (seconds > 0 || (hours == 0 && minutes == 0)) {
+      buffer.write('${seconds}S');
+    }
+  }
+  return buffer.toString();
+}
+
+Duration? _parseDuration(String value) {
+  final compact = value.trim().toUpperCase();
+  final match = RegExp(
+    r'^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$',
+  ).firstMatch(compact);
+  if (match == null) {
+    return null;
+  }
+
+  final weeks = int.tryParse(match.group(2) ?? '') ?? 0;
+  final days = int.tryParse(match.group(3) ?? '') ?? 0;
+  final hours = int.tryParse(match.group(4) ?? '') ?? 0;
+  final minutes = int.tryParse(match.group(5) ?? '') ?? 0;
+  final seconds = int.tryParse(match.group(6) ?? '') ?? 0;
+  final duration = Duration(
+    days: weeks * 7 + days,
+    hours: hours,
+    minutes: minutes,
+    seconds: seconds,
+  );
+  if (match.group(1) == '-') {
+    return Duration(microseconds: -duration.inMicroseconds);
+  }
+  return duration;
+}
+
+Duration? _alarmTriggerRelativeToStart({
+  required DateTime startsAt,
+  required DateTime? endsAt,
+  required _IcsProperty? trigger,
+}) {
+  if (trigger == null) {
+    return null;
+  }
+
+  final triggerDuration = _parseDuration(trigger.value);
+  if (triggerDuration == null) {
+    return null;
+  }
+
+  final relatedToEnd =
+      (_parameterValue(trigger.parameters, 'RELATED') ?? '').toUpperCase() ==
+      'END';
+  if (relatedToEnd && endsAt != null) {
+    return endsAt.add(triggerDuration).difference(startsAt);
+  }
+
+  return triggerDuration;
+}
+
+String? _parameterValue(String parameters, String name) {
+  final target = name.toUpperCase();
+  for (final parameter in parameters.split(';')) {
+    final separator = parameter.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+    final key = parameter.substring(0, separator).toUpperCase();
+    if (key != target) {
+      continue;
+    }
+    var value = parameter.substring(separator + 1).trim();
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value.substring(1, value.length - 1);
+    }
+    return value;
+  }
+  return null;
+}
+
+Map<String, String> _rruleFields(String rule) {
+  final fields = <String, String>{};
+  for (final part in rule.split(';')) {
+    final separator = part.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+    fields[part.substring(0, separator).trim().toUpperCase()] = part
+        .substring(separator + 1)
+        .trim();
+  }
+  return fields;
+}
+
+int? _weekdayFromRRule(String value) {
+  final day = RegExp(
+    r'(MO|TU|WE|TH|FR|SA|SU)$',
+  ).firstMatch(value.toUpperCase());
+  return switch (day?.group(1)) {
+    'MO' => DateTime.monday,
+    'TU' => DateTime.tuesday,
+    'WE' => DateTime.wednesday,
+    'TH' => DateTime.thursday,
+    'FR' => DateTime.friday,
+    'SA' => DateTime.saturday,
+    'SU' => DateTime.sunday,
+    _ => null,
+  };
+}
+
+DateTime? _dateTimeInTimeZone(
+  String timeZoneId, {
+  required int year,
+  required int month,
+  required int day,
+  required int hour,
+  required int minute,
+  required int second,
+}) {
+  if (timeZoneId.toUpperCase() == 'UTC' ||
+      timeZoneId.toUpperCase() == 'ETC/UTC') {
+    return DateTime.utc(year, month, day, hour, minute, second);
+  }
+
+  try {
+    _ensureTimeZonesInitialized();
+    final location = tz.getLocation(timeZoneId);
+    return tz.TZDateTime(
+      location,
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+    ).toUtc();
+  } on Object {
+    return null;
+  }
+}
+
+var _timeZonesInitialized = false;
+
+void _ensureTimeZonesInitialized() {
+  if (_timeZonesInitialized) {
+    return;
+  }
+  tzdata.initializeTimeZones();
+  _timeZonesInitialized = true;
+}
+
+void _writeLine(StringBuffer buffer, String line) {
+  const maxLength = 75;
+  if (line.length <= maxLength) {
+    buffer.writeln(line);
+    return;
+  }
+
+  var remaining = line;
+  var first = true;
+  while (remaining.isNotEmpty) {
+    final chunkLength = first ? maxLength : maxLength - 1;
+    final end = remaining.length > chunkLength ? chunkLength : remaining.length;
+    buffer.writeln(
+      first ? remaining.substring(0, end) : ' ${remaining.substring(0, end)}',
+    );
+    remaining = remaining.substring(end);
+    first = false;
+  }
 }
 
 String _escapeText(String value) {
