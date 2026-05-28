@@ -26,6 +26,7 @@ final class AlarmPlaybackService {
   StreamSubscription<void>? _completeSubscription;
   Timer? _loopWatchdog;
   Timer? _fallbackLoop;
+  Timer? _nativeLoopWatchdog;
   void Function()? _nativeStop;
   int _loopGeneration = 0;
 
@@ -57,6 +58,8 @@ final class AlarmPlaybackService {
     final nativeStop = _nativeStop;
     _nativeStop = null;
     nativeStop?.call();
+    _nativeLoopWatchdog?.cancel();
+    _nativeLoopWatchdog = null;
     _fallbackLoop?.cancel();
     _fallbackLoop = null;
     _loopWatchdog?.cancel();
@@ -91,7 +94,7 @@ final class AlarmPlaybackService {
         return const AlarmPlaybackResult(
           started: true,
           usedCustomAudio: true,
-          message: 'alarme contínuo nativo com WAV personalizado',
+          message: 'alarme contínuo nativo com WAV personalizado rearmado',
         );
       }
       await _startLoopingDeviceFile(path);
@@ -118,7 +121,7 @@ final class AlarmPlaybackService {
         return const AlarmPlaybackResult(
           started: true,
           usedCustomAudio: false,
-          message: 'alarme contínuo nativo do Windows',
+          message: 'alarme contínuo nativo do Windows rearmado',
         );
       }
       await _startLoopingDeviceFile(file.path);
@@ -233,11 +236,69 @@ final class AlarmPlaybackService {
       return false;
     }
     _nativeStop = windowsAttention.stopLoopingSound;
+    final replayInterval = _nativeReplayInterval(path);
+    _nativeLoopWatchdog?.cancel();
+    _nativeLoopWatchdog = Timer.periodic(replayInterval, (_) {
+      if (_nativeStop == null) {
+        return;
+      }
+      windowsAttention.playWavLoop(path);
+    });
     return true;
   }
 
   bool _canUseNativeWindowsWav(String path) {
     return Platform.isWindows && path.toLowerCase().endsWith('.wav');
+  }
+
+  Duration _nativeReplayInterval(String path) {
+    final duration = _readWavDuration(path);
+    if (duration == null) {
+      return const Duration(seconds: 5);
+    }
+
+    final replayMs = (duration.inMilliseconds * 0.75).round();
+    return Duration(milliseconds: replayMs.clamp(800, 6000));
+  }
+
+  Duration? _readWavDuration(String path) {
+    try {
+      final bytes = File(path).readAsBytesSync();
+      if (bytes.length < 44 ||
+          _ascii(bytes, 0, 4) != 'RIFF' ||
+          _ascii(bytes, 8, 12) != 'WAVE') {
+        return null;
+      }
+
+      var offset = 12;
+      int? byteRate;
+      int? dataSize;
+      while (offset + 8 <= bytes.length) {
+        final chunkId = _ascii(bytes, offset, offset + 4);
+        final chunkSize = _uint32(bytes, offset + 4);
+        final chunkData = offset + 8;
+        if (chunkData + chunkSize > bytes.length) {
+          break;
+        }
+
+        if (chunkId == 'fmt ' && chunkSize >= 16) {
+          byteRate = _uint32(bytes, chunkData + 8);
+        } else if (chunkId == 'data') {
+          dataSize = chunkSize;
+          break;
+        }
+
+        offset = chunkData + chunkSize + (chunkSize.isOdd ? 1 : 0);
+      }
+
+      if (byteRate == null || byteRate <= 0 || dataSize == null) {
+        return null;
+      }
+
+      return Duration(milliseconds: (dataSize * 1000 / byteRate).round());
+    } on Object {
+      return null;
+    }
   }
 
   Future<File> _defaultSystemAlarmFile() async {
@@ -314,4 +375,15 @@ void _writeAscii(Uint8List bytes, int offset, String value) {
   for (var i = 0; i < value.length; i++) {
     bytes[offset + i] = value.codeUnitAt(i);
   }
+}
+
+String _ascii(Uint8List bytes, int start, int end) {
+  return String.fromCharCodes(bytes.sublist(start, end));
+}
+
+int _uint32(Uint8List bytes, int offset) {
+  return bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24);
 }

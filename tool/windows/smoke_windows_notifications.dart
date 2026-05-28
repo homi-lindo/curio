@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lume/app_brand.dart';
 import 'package:lume/services/alarm_playback_service.dart';
+import 'package:lume/services/alarm_settings_store.dart';
 import 'package:lume/services/notification_service.dart';
 import 'package:lume/services/windows_attention_service.dart';
 import 'package:lume_core/domain/reminder.dart';
@@ -30,12 +31,7 @@ Future<void> main() async {
   final scheduleTitle =
       'Curió smoke agendado ${_hhmm(scheduleInstant.toLocal())}';
   final attention = const WindowsAttentionService();
-  final smokeAlarmPath =
-      '${Directory.systemTemp.path}${Platform.pathSeparator}curio-smoke-alarm.wav';
-  await File(smokeAlarmPath).writeAsBytes(
-    generateDefaultAlarmWav(duration: const Duration(seconds: 2)),
-    flush: true,
-  );
+  final alarmPlayback = AlarmPlaybackService();
 
   await plugin.show(
     id: immediateId,
@@ -53,9 +49,12 @@ Future<void> main() async {
     payload: 'curio://smoke/windows/immediate',
   );
   final didFlash = attention.flashTaskbar(count: 10);
-  final didPlayNativeLoop = attention.playWavLoop(smokeAlarmPath);
-  await Future<void>.delayed(const Duration(seconds: 2));
-  final didStopNativeLoop = attention.stopLoopingSound();
+  final alarmResult = await alarmPlayback.start(
+    const AlarmSettings(),
+    windowsAttention: attention,
+  );
+  await Future<void>.delayed(const Duration(seconds: 12));
+  await alarmPlayback.stop();
 
   final result = await service.scheduleReminder(
     intent: ReminderIntent.oneShot(
@@ -94,8 +93,9 @@ Future<void> main() async {
   stdout.writeln('SMOKE_WINDOWS_NOTIFICATION_OK');
   stdout.writeln('AUMID: $appWindowsAppUserModelId');
   stdout.writeln('Toast imediato: $immediateId');
-  stdout.writeln('Som nativo em loop: $didPlayNativeLoop');
-  stdout.writeln('Som nativo parado: $didStopNativeLoop');
+  stdout.writeln('Alarme app iniciado: ${alarmResult.started}');
+  stdout.writeln('Alarme app modo: ${alarmResult.message}');
+  stdout.writeln('Alarme app parado: true');
   stdout.writeln('Ícone piscou: $didFlash');
   stdout.writeln('Agendada e cancelada: $scheduledId');
 
