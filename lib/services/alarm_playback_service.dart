@@ -4,10 +4,14 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'alarm_settings_store.dart';
 import 'windows_attention_service.dart';
+
+const String defaultAlarmAssetPath =
+    'assets/audio/curio_canto_praia_alarm_v1.wav';
 
 final class AlarmPlaybackResult {
   const AlarmPlaybackResult({
@@ -257,8 +261,8 @@ final class AlarmPlaybackService {
       return const Duration(seconds: 5);
     }
 
-    final replayMs = (duration.inMilliseconds * 0.75).round();
-    return Duration(milliseconds: replayMs.clamp(800, 6000));
+    final replayMs = (duration.inMilliseconds * 0.95).round();
+    return Duration(milliseconds: replayMs.clamp(800, 57000));
   }
 
   Duration? _readWavDuration(String path) {
@@ -304,9 +308,9 @@ final class AlarmPlaybackService {
   Future<File> _defaultSystemAlarmFile() async {
     final directory = await getTemporaryDirectory();
     final file = File(
-      '${directory.path}${Platform.pathSeparator}curio-alarm.wav',
+      '${directory.path}${Platform.pathSeparator}curio-canto-praia-alarm-v1.wav',
     );
-    final bytes = generateDefaultAlarmWav();
+    final bytes = await loadDefaultAlarmWavBytes();
     if (!await file.exists() || await file.length() != bytes.length) {
       await file.writeAsBytes(bytes, flush: true);
     }
@@ -314,9 +318,18 @@ final class AlarmPlaybackService {
   }
 }
 
+Future<Uint8List> loadDefaultAlarmWavBytes() async {
+  try {
+    final data = await rootBundle.load(defaultAlarmAssetPath);
+    return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+  } on Object {
+    return generateDefaultAlarmWav();
+  }
+}
+
 Uint8List generateDefaultAlarmWav({
-  int sampleRate = 44100,
-  Duration duration = const Duration(seconds: 8),
+  int sampleRate = 22050,
+  Duration duration = const Duration(minutes: 1),
 }) {
   final sampleCount = (sampleRate * duration.inMilliseconds / 1000).round();
   const channels = 1;
@@ -342,33 +355,34 @@ Uint8List generateDefaultAlarmWav({
 
   for (var i = 0; i < sampleCount; i++) {
     final t = i / sampleRate;
-    final cycle = t % 1.0;
-    final frequency = switch (cycle) {
-      < 0.42 => 920.0,
-      < 0.50 => 0.0,
-      < 0.92 => 690.0,
-      _ => 0.0,
-    };
-    final fade = _edgeFade(cycle);
-    final sample = frequency == 0
-        ? 0
-        : (math.sin(2 * math.pi * frequency * t) * 32767 * 0.38 * fade).round();
+    final beat = t % 1.0;
+    final breath = 0.78 + 0.22 * math.sin(2 * math.pi * t / 12);
+    final pulse = 0.32 + 0.68 * math.pow(_pulseEnvelope(beat), 1.35);
+    final shimmer = 0.5 + 0.5 * math.sin(2 * math.pi * t / 20);
+    final pitchDrift = 1 + 0.006 * math.sin(2 * math.pi * t / 15);
+    final primary =
+        math.sin(2 * math.pi * 740 * pitchDrift * t) * (0.34 + 0.10 * shimmer);
+    final secondary =
+        math.sin(2 * math.pi * 880 * t + 0.18 * math.sin(2 * math.pi * t / 6)) *
+        0.28;
+    final floor = math.sin(2 * math.pi * 370 * t) * 0.12;
+    final ping =
+        math.sin(2 * math.pi * 1480 * t) *
+        math.exp(-beat * 10) *
+        (0.22 + 0.08 * shimmer);
+    final overtone = math.sin(2 * math.pi * 1110 * t) * 0.08 * breath;
+    final mixed = (primary + secondary + floor + ping + overtone) * pulse;
+    final sample = (mixed * 32767 * 0.62).clamp(-32767, 32767).round();
     data.setInt16(44 + i * bytesPerSample, sample, Endian.little);
   }
 
   return bytes;
 }
 
-double _edgeFade(double cycle) {
-  const fadeSeconds = 0.018;
-  final nearestEdge = <double>[
-    cycle,
-    (0.42 - cycle).abs(),
-    (0.50 - cycle).abs(),
-    (0.92 - cycle).abs(),
-    (1.00 - cycle).abs(),
-  ].reduce(math.min);
-  return (nearestEdge / fadeSeconds).clamp(0, 1).toDouble();
+double _pulseEnvelope(double beat) {
+  final first = math.exp(-beat * 4.5);
+  final second = beat < 0.5 ? 0.0 : math.exp(-(beat - 0.5) * 5.2) * 0.58;
+  return math.max(first, second);
 }
 
 void _writeAscii(Uint8List bytes, int offset, String value) {
