@@ -22,11 +22,16 @@ RUN mkdir -p /out \
 
 FROM debian:bookworm-slim AS runtime
 
-RUN useradd --system --create-home --home-dir /home/lume lume \
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --create-home --home-dir /home/lume lume \
   && mkdir -p /data \
   && chown -R lume:lume /data /home/lume
 
 COPY --from=build /out/lume_sync_server /usr/local/bin/lume_sync_server
+COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 USER lume
 EXPOSE 8787
@@ -36,4 +41,7 @@ ENV LUME_SYNC_HOST=0.0.0.0 \
   LUME_SYNC_PORT=8787 \
   LUME_SYNC_FILE=/data/server-state.json
 
-ENTRYPOINT ["/usr/local/bin/lume_sync_server"]
+# Auto-generates a self-signed cert into /data and enables HTTPS on first run
+# (set LUME_SYNC_TLS_AUTO=0 to opt out). The server prints the pinning
+# fingerprint / pairing code at startup.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

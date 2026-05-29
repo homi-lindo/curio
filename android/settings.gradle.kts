@@ -19,7 +19,11 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "9.0.1" apply false
+    // AGP 8.11.1 is Flutter 3.44's recommended floor (warnAGPVersion) and is the
+    // latest stable AGP line the plugin ecosystem supports. AGP 9 makes built-in
+    // Kotlin the default, which the plugins we use (file_picker) do not yet
+    // support — they still apply the legacy kotlin-android plugin.
+    id("com.android.application") version "8.11.1" apply false
     id("org.jetbrains.kotlin.android") version "2.3.20" apply false
 }
 

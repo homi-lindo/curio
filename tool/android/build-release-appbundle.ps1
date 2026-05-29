@@ -44,8 +44,18 @@ try {
     Add-DartDefine -Args $buildArgs -Name 'CURIO_MICROSOFT_CLIENT_ID' -Value $MicrosoftClientId
     Add-DartDefine -Args $buildArgs -Name 'CURIO_MICROSOFT_TENANT' -Value $MicrosoftTenant
 
-    & $Flutter @buildArgs 2>&1 | Tee-Object -FilePath $logPath
-    $exitCode = $LASTEXITCODE
+    # Flutter writes non-fatal warnings (e.g. Kotlin Gradle plugin notices) to
+    # stderr; with ErrorActionPreference=Stop those would abort the script
+    # before we can inspect the real exit code. Relax it around the native call
+    # and fail only on a non-zero exit code.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Flutter @buildArgs 2>&1 | Tee-Object -FilePath $logPath
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     if ($exitCode -ne 0) {
         throw "flutter build appbundle failed with exit code $exitCode. See $logPath"
     }

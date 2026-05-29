@@ -13,9 +13,16 @@ services:
       LUME_SYNC_FILE: /data/server-state.json
       LUME_SYNC_TOKEN: ${LUME_SYNC_TOKEN:?set LUME_SYNC_TOKEN in .env}
       LUME_SYNC_MAX_BODY_BYTES: ${LUME_SYNC_MAX_BODY_BYTES:-10485760}
+      # HTTPS is automatic: on first run the entrypoint generates a self-signed
+      # certificate in the data volume and the server prints a pairing code.
+      # Set the address devices use to reach this server so the printed pairing
+      # code is complete (otherwise only the fingerprint is shown):
+      LUME_SYNC_PUBLIC_HOST: ${LUME_SYNC_PUBLIC_HOST:-}
+      # Set to 0 to disable auto-TLS (e.g. when terminating TLS elsewhere):
+      # LUME_SYNC_TLS_AUTO: "0"
       # Native apps do not need CORS. Set this only for browser diagnostics.
       # LUME_SYNC_CORS_ORIGIN: ${LUME_SYNC_CORS_ORIGIN:-}
-      # Uncomment these after mounting PEM files under ./certs.
+      # Bring your own certificate instead of the auto-generated one:
       # LUME_SYNC_TLS_CERT: /certs/cert.pem
       # LUME_SYNC_TLS_KEY: /certs/key.pem
       # LUME_SYNC_TLS_KEY_PASSWORD: ${LUME_SYNC_TLS_KEY_PASSWORD:-}
