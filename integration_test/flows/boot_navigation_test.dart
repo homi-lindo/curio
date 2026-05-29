@@ -18,11 +18,18 @@ void bootNavigationTests() {
       expect(find.text('Hoje'), findsWidgets);
     });
 
-    testWidgets('navega entre as cinco abas', (tester) async {
+    testWidgets('navega entre as seis abas', (tester) async {
       final harness = await pumpApp(tester);
       addTearDown(harness.dispose);
 
-      final labels = <String>['Hoje', 'Agenda', 'Quadro', 'Notas', 'Sync'];
+      final labels = <String>[
+        'Hoje',
+        'Agenda',
+        'Quadro',
+        'Notas',
+        'Tarefas',
+        'Sync',
+      ];
 
       for (final label in labels) {
         // Find the navigation destination by label.
@@ -58,6 +65,7 @@ void bootNavigationTests() {
           'Agenda',
           'Quadro',
           'Notas',
+          'Tarefas',
           'Sync',
           'Hoje',
         ]) {

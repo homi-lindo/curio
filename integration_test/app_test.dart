@@ -7,6 +7,7 @@ import 'flows/boot_navigation_test.dart';
 import 'flows/keyboard_zoom_test.dart';
 import 'flows/notes_test.dart';
 import 'flows/sync_test.dart';
+import 'flows/tasks_test.dart';
 import 'flows/today_test.dart';
 
 void main() {
@@ -17,6 +18,7 @@ void main() {
   agendaTests();
   boardTests();
   notesTests();
+  tasksTests();
   syncTests();
   keyboardZoomTests();
 }

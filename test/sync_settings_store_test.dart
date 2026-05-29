@@ -17,6 +17,7 @@ void main() {
     final settings = SyncSettings(
       serverUrl: 'http://127.0.0.1:8787',
       authToken: 'shared-secret',
+      pinnedCertSha256: 'abc123',
       lastMessage: 'sync ok',
       lastSyncedAtUtc: DateTime.utc(2026, 5, 20, 15),
     );
@@ -30,6 +31,9 @@ void main() {
     expect(await secrets.read('syncToken'), 'shared-secret');
     expect(loaded.serverUrl, settings.serverUrl);
     expect(loaded.authToken, settings.authToken);
+    // The pinned fingerprint is public, so it persists in the settings file.
+    expect(raw, contains('abc123'));
+    expect(loaded.pinnedCertSha256, 'abc123');
     expect(loaded.lastMessage, 'sync ok');
     expect(loaded.lastSyncedAtUtc, settings.lastSyncedAtUtc);
   });

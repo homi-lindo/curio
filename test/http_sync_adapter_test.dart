@@ -75,6 +75,58 @@ void main() {
     expect(result.pulledRecords, 1);
   });
 
+  test(
+    'http sync adapter surfaces a malformed server snapshot as an error',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+
+      unawaited(() async {
+        await for (final request in server) {
+          await utf8.decodeStream(request);
+          request.response.headers.contentType = ContentType.json;
+          // Well-formed JSON, but the snapshot has a bad enum/shape — a hostile
+          // or buggy server must not crash the client.
+          request.response.write(
+            jsonEncode(<String, Object?>{
+              'snapshot': <String, Object?>{
+                'tasks': <Object?>[
+                  <String, Object?>{
+                    'id': 'task-1',
+                    'title': 'x',
+                    'status': 'bogus',
+                  },
+                ],
+                'notes': <Object?>[],
+                'scheduledNotifications': <Object?>[],
+              },
+            }),
+          );
+          await request.response.close();
+        }
+      }());
+
+      final adapter = HttpSyncAdapter(
+        serverUrl: Uri.parse('http://127.0.0.1:${server.port}'),
+        authToken: 'shared-secret-012345',
+        allowInsecureHttp: true,
+      );
+      addTearDown(adapter.dispose);
+
+      await expectLater(
+        adapter.synchronize(
+          snapshot: const AppSnapshot(
+            tasks: <TaskItem>[],
+            notes: <NoteItem>[],
+            scheduledNotifications: [],
+          ),
+          deviceId: 'lume-test',
+        ),
+        throwsA(anything),
+      );
+    },
+  );
+
   test('http sync adapter rejects plain http unless explicitly allowed', () {
     expect(
       () => HttpSyncAdapter(

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
+import 'package:lume_core/sync/sync_adapter.dart';
 import 'package:lume_sync_server/snapshot_store.dart';
 
 void main() {
@@ -85,6 +86,67 @@ void main() {
 
     expect(raw['scheduledNotifications'], isEmpty);
   });
+
+  test(
+    'server merges and persists reminders while dropping notifications',
+    () async {
+      final temp = await Directory.systemTemp.createTemp(
+        'lume_server_snapshot_',
+      );
+      addTearDown(() async {
+        if (await temp.exists()) {
+          await temp.delete(recursive: true);
+        }
+      });
+
+      final stateFile = File('${temp.path}/server-state.json');
+      final store = ServerSnapshotStore(stateFile);
+      final now = DateTime.utc(2026, 5, 21, 15);
+
+      // Device A pushes a snapshot carrying a reminder plus a device-local
+      // notification record. This mirrors lume_sync_server's /sync handler:
+      // merge(current, syncableServerSnapshot(incoming)) then persist.
+      final incoming = AppSnapshot(
+        tasks: const <TaskItem>[],
+        notes: <NoteItem>[_note('note-local')],
+        scheduledNotifications: <ScheduledNotificationRecord>[
+          ScheduledNotificationRecord(
+            id: 1,
+            deviceId: 'windows-a',
+            reminderIntentId: 'rem-1',
+            ownerId: 'note-local',
+            ownerType: ReminderOwnerType.note,
+            occurrenceKey: '2026-05-21T15:00:00Z',
+            scheduledForUtc: now,
+            payload: 'local-only',
+          ),
+        ],
+        reminders: <ReminderIntent>[
+          ReminderIntent.oneShot(
+            id: 'rem-1',
+            ownerId: 'note-local',
+            ownerType: ReminderOwnerType.note,
+            instantUtc: now.add(const Duration(hours: 1)),
+            updatedAtUtc: now,
+            title: 'Lembrete sincronizado',
+          ),
+        ],
+      );
+
+      final current = await store.load();
+      final merged = const SnapshotSyncMerger().merge(
+        local: current,
+        remote: syncableServerSnapshot(incoming),
+      );
+      await store.save(merged);
+
+      // Device B pulls: the reminder is there, the local notification is not.
+      final servedToDeviceB = await store.load();
+      expect(servedToDeviceB.reminders.single.id, 'rem-1');
+      expect(servedToDeviceB.reminders.single.title, 'Lembrete sincronizado');
+      expect(servedToDeviceB.scheduledNotifications, isEmpty);
+    },
+  );
 }
 
 AppSnapshot _snapshotWithNote(String id) {

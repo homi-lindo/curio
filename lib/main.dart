@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
+import 'package:lume_core/sync/sync_pairing.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_brand.dart';
@@ -41,13 +42,22 @@ import 'ui/views/agenda_view.dart';
 import 'ui/views/board_view.dart';
 import 'ui/views/notes_view.dart';
 import 'ui/views/sync_view.dart';
+import 'ui/views/tasks_view.dart';
 import 'ui/views/today_view.dart';
 import 'ui/zoomed_page.dart';
+
+part 'main_backup_actions.dart';
+part 'main_sync_actions.dart';
+part 'main_task_actions.dart';
 
 Future<void> main() async {
   LumeWidgetsBinding.ensureInitialized();
   runApp(CurioApp(notifications: NotificationService()));
 }
+
+/// Navigation tabs in display order. The order here defines `_selectedIndex`
+/// values and must match both the `pages` list and `_HomeShell._destinations()`.
+enum _AppTab { today, agenda, board, notes, tasks, sync }
 
 final class CurioApp extends StatefulWidget {
   CurioApp({
@@ -81,38 +91,47 @@ final class CurioApp extends StatefulWidget {
   State<CurioApp> createState() => _CurioAppState();
 }
 
-final class _CurioAppState extends State<CurioApp> {
+final class _CurioAppState extends State<CurioApp>
+    with _TaskActions, _BackupActions, _SyncActions {
   late final Future<void> _startup;
   late final TextEditingController _noteController;
+  @override
   late final TextEditingController _syncServerController;
+  @override
   late final TextEditingController _syncTokenController;
+  @override
   late final LocalSyncSidecar _syncSidecar;
   late final SnapshotWriteQueue _snapshotWrites;
   final AsyncActionGate _actionGate = AsyncActionGate();
+  @override
   final ActionErrorDescriber _errorDescriber = const ActionErrorDescriber();
-  final SyncSettingsValidator _syncSettingsValidator =
-      const SyncSettingsValidator();
-  final ManualBackupCodec _manualBackupCodec = const ManualBackupCodec();
-  final CalendarIcsCodec _calendarIcsCodec = const CalendarIcsCodec();
+  @override
   final WindowsAttentionService _windowsAttention =
       const WindowsAttentionService();
+  @override
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  @override
   BuildContext get _dialogContext => _navigatorKey.currentContext ?? context;
 
   int _selectedIndex = 0;
   double _uiZoom = 1;
+  TaskFilter _taskFilter = TaskFilter.open;
   DateTime _agendaDate = dateOnly(DateTime.now());
   DateTime _notesDate = dateOnly(DateTime.now());
   bool _busy = false;
+  @override
   String _deviceId = 'lume-${defaultTargetPlatform.name}';
+  @override
   SyncSettings _syncSettings = const SyncSettings();
   AppearanceSettings _appearance = const AppearanceSettings();
+  @override
   AlarmSettings _alarmSettings = const AlarmSettings();
   LocalSyncSidecarState? _syncSidecarState;
   SyncResult? _lastSyncResult;
+  @override
   AppSnapshot? _snapshot;
   String? _selectedNoteId;
   ScheduledNotificationRecord? _activeAlarmRecord;
@@ -164,22 +183,17 @@ final class _CurioAppState extends State<CurioApp> {
     final appearance = await widget.appearanceSettings.load();
     final alarmSettings = await widget.alarmSettings.load();
     final noteHistory = await widget.noteHistory.load();
-    final snapshot = await widget.store.load();
-    if (mounted) {
-      setState(() {
-        _deviceId = deviceId;
-        _syncSettings = syncSettings;
-        _appearance = appearance;
-        _alarmSettings = alarmSettings;
-        _uiZoom = appearance.pageZoom;
-        _syncServerController.text = syncSettings.serverUrl;
-        _syncTokenController.text = syncSettings.authToken;
-        _snapshot = snapshot;
-        _noteHistory = noteHistory;
-        _selectedNoteId = snapshot.notes.firstOrNull?.id;
-        _noteController.text = snapshot.notes.firstOrNull?.body ?? '';
-      });
-    } else {
+    final loaded = await widget.store.load();
+    final nowUtc = DateTime.now().toUtc();
+    // Backfill syncable reminders for notifications scheduled before reminders
+    // were synced (e.g. data from an older app version), so the reconcile below
+    // does not treat them as orphans. Then bound long-term growth by dropping
+    // expired tombstones and long-fired one-shot reminders.
+    final snapshot = compactSnapshot(
+      backfillRemindersFromRecords(loaded, nowUtc: nowUtc),
+      nowUtc: nowUtc,
+    );
+    _applyState(() {
       _deviceId = deviceId;
       _syncSettings = syncSettings;
       _appearance = appearance;
@@ -191,7 +205,7 @@ final class _CurioAppState extends State<CurioApp> {
       _noteHistory = noteHistory;
       _selectedNoteId = snapshot.notes.firstOrNull?.id;
       _noteController.text = snapshot.notes.firstOrNull?.body ?? '';
-    }
+    });
     _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
 
     final notificationsReady = await _initializeNotificationsSafely();
@@ -210,6 +224,16 @@ final class _CurioAppState extends State<CurioApp> {
           'timezone mudou: revise ${driftedNotifications.length} lembrete(s)',
         );
       }
+
+      // Arm any synced reminder this install hasn't scheduled locally yet
+      // (e.g. after a fresh install that pulled reminders from another device),
+      // and persist if either the reconcile or the boot compaction changed
+      // anything relative to what was loaded.
+      final current = _snapshot ?? snapshot;
+      final reconciled = await _reconcileReminders(current);
+      if (!identical(reconciled, loaded)) {
+        await _saveSnapshot(reconciled);
+      }
     }
   }
 
@@ -222,7 +246,7 @@ final class _CurioAppState extends State<CurioApp> {
             return;
           }
           setState(() {
-            _selectedIndex = 0;
+            _selectedIndex = _AppTab.today.index;
           });
           _log('notificação aberta');
         },
@@ -243,6 +267,7 @@ final class _CurioAppState extends State<CurioApp> {
     return notificationsReady;
   }
 
+  @override
   Future<void> _refreshPendingCount() async {
     try {
       final pending = await widget.notifications.pending();
@@ -294,14 +319,11 @@ final class _CurioAppState extends State<CurioApp> {
     setState(() => _notificationComposerOpen = true);
   }
 
+  @override
   Future<bool> _ensureNotificationCreationAuthorization() async {
     try {
       var state = await widget.notifications.currentPermissionState();
-      if (mounted) {
-        setState(() => _permissionState = state);
-      } else {
-        _permissionState = state;
-      }
+      _applyState(() => _permissionState = state);
 
       if (state.canCreateExactReminders) {
         return true;
@@ -310,11 +332,7 @@ final class _CurioAppState extends State<CurioApp> {
       state = await widget.notifications.requestMissingSchedulePermissions(
         current: state,
       );
-      if (mounted) {
-        setState(() => _permissionState = state);
-      } else {
-        _permissionState = state;
-      }
+      _applyState(() => _permissionState = state);
 
       if (state.canCreateExactReminders) {
         _log('autorizações de notificação prontas');
@@ -390,7 +408,12 @@ final class _CurioAppState extends State<CurioApp> {
       if (snapshot == null) {
         return;
       }
-      final next = await _withoutNotificationRecord(snapshot, record);
+      final withoutRecord = await _withoutNotificationRecord(snapshot, record);
+      final next = _withoutReminderIntent(
+        withoutRecord,
+        record.reminderIntentId,
+        _deviceId,
+      );
       await _saveSnapshot(next);
       await _recordNotificationRevision(
         record: record,
@@ -439,6 +462,8 @@ final class _CurioAppState extends State<CurioApp> {
         instantUtc: scheduledAtUtc,
         updatedAtUtc: DateTime.now().toUtc(),
         timeZone: widget.notifications.localTimeZoneId,
+        title: draft.title.trim(),
+        body: draft.body.trim(),
       );
 
       final ScheduleResult? result;
@@ -460,7 +485,7 @@ final class _CurioAppState extends State<CurioApp> {
       final scheduled = result;
       setState(() => _permissionState = scheduled.permissionState);
       await _saveSnapshot(
-        snapshot.copyWith(
+        _withReminderIntent(snapshot, intent).copyWith(
           scheduledNotifications: <ScheduledNotificationRecord>[
             scheduled.record,
             ...snapshot.scheduledNotifications.where(
@@ -485,6 +510,7 @@ final class _CurioAppState extends State<CurioApp> {
     return saved;
   }
 
+  @override
   Future<AppSnapshot> _withoutNotificationRecord(
     AppSnapshot snapshot,
     ScheduledNotificationRecord record,
@@ -508,6 +534,71 @@ final class _CurioAppState extends State<CurioApp> {
     return _snapshot?.notes
         .where((candidate) => candidate.id == record.ownerId)
         .firstOrNull;
+  }
+
+  /// Aligns this device's locally scheduled notifications with the synced
+  /// reminder list: arms any enabled reminder this device hasn't scheduled yet
+  /// and cancels local notifications whose reminder was removed or disabled on
+  /// another device. Each device keeps its own notification ids; only the
+  /// reminder intents travel between devices. Returns the same snapshot when
+  /// nothing changed.
+  @override
+  Future<AppSnapshot> _reconcileReminders(AppSnapshot snapshot) async {
+    final activeById = <String, ReminderIntent>{
+      for (final intent in snapshot.reminders)
+        if (intent.enabled) intent.id: intent,
+    };
+    var records = snapshot.scheduledNotifications;
+
+    final orphans = records
+        .where((record) => !activeById.containsKey(record.reminderIntentId))
+        .toList();
+    for (final record in orphans) {
+      try {
+        await widget.notifications.cancel(record.id);
+      } on Object catch (error) {
+        _log('lembrete não cancelado: ${_errorDescriber.describe(error)}');
+      }
+    }
+    if (orphans.isNotEmpty) {
+      final orphanIds = orphans.map((record) => record.id).toSet();
+      records = records
+          .where((record) => !orphanIds.contains(record.id))
+          .toList();
+    }
+
+    final scheduledIntentIds = records
+        .map((record) => record.reminderIntentId)
+        .toSet();
+    final additions = <ScheduledNotificationRecord>[];
+    for (final intent in activeById.values) {
+      if (scheduledIntentIds.contains(intent.id)) {
+        continue;
+      }
+      try {
+        final result = await widget.notifications.scheduleReminder(
+          intent: intent,
+          deviceId: _deviceId,
+          title: intent.title,
+          body: intent.body,
+        );
+        if (result != null) {
+          additions.add(result.record);
+        }
+      } on Object catch (error) {
+        _log('lembrete não agendado: ${_errorDescriber.describe(error)}');
+      }
+    }
+
+    if (orphans.isEmpty && additions.isEmpty) {
+      return snapshot;
+    }
+    return snapshot.copyWith(
+      scheduledNotifications: <ScheduledNotificationRecord>[
+        ...additions,
+        ...records,
+      ],
+    );
   }
 
   Future<void> _recordNotificationRevision({
@@ -537,11 +628,7 @@ final class _CurioAppState extends State<CurioApp> {
 
     try {
       final next = await widget.noteHistory.add(revision);
-      if (mounted) {
-        setState(() => _noteHistory = next);
-      } else {
-        _noteHistory = next;
-      }
+      _applyState(() => _noteHistory = next);
     } on Object catch (error) {
       _log('log de notificação não salvo: ${_errorDescriber.describe(error)}');
     }
@@ -691,7 +778,7 @@ final class _CurioAppState extends State<CurioApp> {
         _selectedNoteId = existing.id;
         _noteController.text = existing.body;
         _notesDate = selectedDate;
-        _selectedIndex = 3;
+        _selectedIndex = _AppTab.notes.index;
         _notificationComposerOpen = false;
       });
       _log('nota do dia aberta');
@@ -716,7 +803,7 @@ final class _CurioAppState extends State<CurioApp> {
         _selectedNoteId = note.id;
         _noteController.text = note.body;
         _notesDate = selectedDate;
-        _selectedIndex = 3;
+        _selectedIndex = _AppTab.notes.index;
         _notificationComposerOpen = false;
       });
       _log('nota do dia criada');
@@ -739,7 +826,7 @@ final class _CurioAppState extends State<CurioApp> {
             _noteController.text = note.body;
             _notesDate =
                 dailyNoteDate(note) ?? dateOnly(record.scheduledForUtc);
-            _selectedIndex = 3;
+            _selectedIndex = _AppTab.notes.index;
             _notificationComposerOpen = false;
           });
           return;
@@ -777,7 +864,7 @@ final class _CurioAppState extends State<CurioApp> {
           return;
         }
         setState(() {
-          _selectedIndex = 3;
+          _selectedIndex = _AppTab.notes.index;
           _selectedNoteId = note.id;
           _noteController.text = note.body;
           _notesDate = dailyNoteDate(note) ?? _notesDate;
@@ -809,6 +896,7 @@ final class _CurioAppState extends State<CurioApp> {
     _setUiZoom(stepPageZoom(_uiZoom, steps));
   }
 
+  @override
   NoteItem? _selectedNote(AppSnapshot? snapshot) {
     final selectedNoteId = _selectedNoteId;
     if (snapshot == null || selectedNoteId == null) {
@@ -872,11 +960,7 @@ final class _CurioAppState extends State<CurioApp> {
 
     try {
       final next = await widget.noteHistory.add(revision);
-      if (mounted) {
-        setState(() => _noteHistory = next);
-      } else {
-        _noteHistory = next;
-      }
+      _applyState(() => _noteHistory = next);
       _log('histórico salvo: ${note.title}');
     } on Object catch (error) {
       _log('histórico não salvo: ${_errorDescriber.describe(error)}');
@@ -919,7 +1003,7 @@ final class _CurioAppState extends State<CurioApp> {
       final next = snapshot.copyWith(notes: nextNotes);
       await _saveSnapshot(next);
       setState(() {
-        _selectedIndex = 3;
+        _selectedIndex = _AppTab.notes.index;
         _selectedNoteId = restored.id;
         _notesDate = dailyNoteDate(restored) ?? _notesDate;
         _noteController.text = restored.body;
@@ -928,608 +1012,7 @@ final class _CurioAppState extends State<CurioApp> {
     });
   }
 
-  Future<void> _saveSyncSettings() async {
-    await _runAction(() async {
-      final serverUrl = _syncSettingsValidator.normalizeServerUrl(
-        _syncServerController.text,
-      );
-      final authToken = _syncTokenController.text.trim();
-      _syncSettingsValidator.validate(
-        serverUrl: serverUrl,
-        authToken: authToken,
-      );
-      final settings = _syncSettings.copyWith(
-        serverUrl: serverUrl,
-        authToken: authToken,
-      );
-      await widget.syncSettings.save(settings);
-      setState(() {
-        _syncSettings = settings;
-        _syncServerController.text = serverUrl;
-        _syncTokenController.text = authToken;
-      });
-      _log(serverUrl.isEmpty ? 'sync local salvo' : 'sync remoto salvo');
-    });
-  }
-
-  Future<void> _saveAppearanceSettings(AppearanceSettings settings) async {
-    try {
-      await widget.appearanceSettings.save(settings);
-      if (mounted) {
-        setState(() => _appearance = settings);
-      } else {
-        _appearance = settings;
-      }
-      _log(
-        'aparência: ${settings.themeProfile.label} · ${settings.themeMode.label}',
-      );
-    } on Object catch (error) {
-      _log('aparência não salva: ${_errorDescriber.describe(error)}');
-    }
-  }
-
-  Future<void> _saveAlarmSettings(AlarmSettings settings) async {
-    try {
-      await widget.alarmSettings.save(settings);
-      if (mounted) {
-        setState(() => _alarmSettings = settings);
-      } else {
-        _alarmSettings = settings;
-      }
-      _log('alarme: ${settings.label}');
-    } on Object catch (error) {
-      _log('alarme não salvo: ${_errorDescriber.describe(error)}');
-    }
-  }
-
-  Future<void> _pickAlarmAudio() async {
-    await _runAction(() async {
-      final result = await FilePicker.pickFiles(
-        dialogTitle: 'Escolher áudio do alarme',
-        type: FileType.custom,
-        allowedExtensions: alarmAudioExtensions,
-        allowMultiple: false,
-        withData: false,
-      );
-      final path = result?.files.single.path;
-      if (path == null || path.trim().isEmpty) {
-        return;
-      }
-
-      final settings = await widget.alarmSettings.installCustomAudio(
-        path,
-        current: _alarmSettings,
-      );
-      setState(() => _alarmSettings = settings);
-      _log('áudio de alarme salvo: ${settings.customAudioName}');
-    });
-  }
-
-  Future<void> _clearAlarmAudio() async {
-    await _runAction(() async {
-      final settings = await widget.alarmSettings.clearCustomAudio(
-        _alarmSettings,
-      );
-      await widget.alarmPlayback.stop();
-      setState(() {
-        _alarmSettings = settings;
-        _activeAlarmRecord = null;
-      });
-      _log('áudio personalizado removido');
-    });
-  }
-
-  Future<void> _testAlarmAudio() async {
-    await _runAction(() async {
-      final result = await widget.alarmPlayback.start(
-        _alarmSettings,
-        windowsAttention: _windowsAttention,
-      );
-      final didFlash = defaultTargetPlatform == TargetPlatform.windows
-          ? _windowsAttention.flashTaskbar(count: 16)
-          : false;
-      setState(() => _activeAlarmRecord = null);
-      _log(didFlash ? '${result.message}; ícone piscando' : result.message);
-    });
-  }
-
-  Future<void> _exportCalendarIcs() async {
-    await _runAction(() async {
-      final snapshot = _snapshot;
-      if (snapshot == null) {
-        return;
-      }
-
-      final ics = _calendarIcsCodec.encode(snapshot);
-      final fileName =
-          'curio-agenda-${_backupFileTimestamp(DateTime.now())}.ics';
-      final path = await FilePicker.saveFile(
-        dialogTitle: 'Exportar agenda para Outlook/Google',
-        fileName: fileName,
-        type: FileType.custom,
-        allowedExtensions: const <String>['ics'],
-        bytes: Uint8List.fromList(utf8.encode(ics)),
-        lockParentWindow: true,
-      );
-      if (path == null) {
-        return;
-      }
-      _log('agenda .ics exportada: $path');
-    });
-  }
-
-  Future<void> _importCalendarIcs() async {
-    await _runAction(() async {
-      final result = await FilePicker.pickFiles(
-        dialogTitle: 'Importar agenda do Outlook/Google',
-        type: FileType.custom,
-        allowedExtensions: const <String>['ics'],
-        allowMultiple: false,
-        withData: false,
-      );
-      final path = result?.files.single.path;
-      if (path == null || path.trim().isEmpty) {
-        return;
-      }
-
-      final import = _calendarIcsCodec.decode(await File(path).readAsString());
-      await _applyCalendarImport(import);
-      _log('agenda .ics importada: ${import.events.length} evento(s)');
-    });
-  }
-
-  Future<void> _applyCalendarImport(CalendarIcsImport import) async {
-    final currentSnapshot = _snapshot;
-    if (currentSnapshot == null) {
-      return;
-    }
-    var snapshot = currentSnapshot;
-
-    final nowUtc = DateTime.now().toUtc();
-    final notificationEvents = import.events
-        .where((event) => _calendarEventCanCreateNotification(event, nowUtc))
-        .toList();
-    if (notificationEvents.isNotEmpty) {
-      final authorized = await _ensureNotificationCreationAuthorization();
-      if (!authorized) {
-        _log('agenda não importada: autorização de notificação pendente');
-        return;
-      }
-    }
-
-    final notes = <NoteItem>[...snapshot.notes];
-    final importedRecords = <ScheduledNotificationRecord>[];
-    var notesChanged = 0;
-    var notificationsChanged = 0;
-
-    for (final event in import.events) {
-      final localDate = dateOnly(event.startsAtUtc.toLocal());
-      final note = _upsertImportedDailyNote(
-        notes,
-        date: localDate,
-        event: event,
-        nowUtc: nowUtc,
-      );
-      if (note.changed) {
-        notesChanged++;
-      }
-
-      if (!_calendarEventCanCreateNotification(event, nowUtc)) {
-        continue;
-      }
-
-      final intentId = _calendarEventReminderId(event);
-      final notificationUtc = _calendarEventNotificationUtc(event, nowUtc);
-      final existingRecord = snapshot.scheduledNotifications
-          .where((record) => record.reminderIntentId == intentId)
-          .firstOrNull;
-      if (existingRecord != null) {
-        snapshot = await _withoutNotificationRecord(snapshot, existingRecord);
-      }
-
-      final alreadyExists = snapshot.scheduledNotifications.any(
-        (record) =>
-            record.title.trim() == event.title.trim() &&
-            record.scheduledForUtc
-                    .difference(notificationUtc)
-                    .abs()
-                    .inMinutes ==
-                0,
-      );
-      if (alreadyExists) {
-        continue;
-      }
-
-      final intent = _calendarImportReminderIntent(
-        event: event,
-        noteId: note.note.id,
-        notificationUtc: notificationUtc,
-        nowUtc: nowUtc,
-        timeZone: widget.notifications.localTimeZoneId,
-      );
-      final result = await widget.notifications.scheduleReminder(
-        intent: intent,
-        deviceId: _deviceId,
-        title: event.title,
-        body: event.description,
-      );
-      if (result != null) {
-        importedRecords.add(result.record);
-        notificationsChanged++;
-      }
-    }
-
-    snapshot = snapshot.copyWith(
-      notes: notes,
-      scheduledNotifications: <ScheduledNotificationRecord>[
-        ...importedRecords,
-        ...snapshot.scheduledNotifications,
-      ],
-    );
-    await _saveSnapshot(snapshot);
-    _syncSelectionAfterSnapshot(snapshot);
-    await _refreshPendingCount();
-    _log(
-      'agenda aplicada: $notesChanged nota(s), '
-      '$notificationsChanged notificação(ões)',
-    );
-  }
-
-  Future<void> _copyManualBackup() async {
-    await _runAction(() async {
-      final snapshot = _snapshot;
-      if (snapshot == null) {
-        return;
-      }
-
-      final backup = _manualBackupCodec.encode(snapshot);
-      File? file;
-      try {
-        file = await _writeManualBackupFile(backup);
-      } on Object catch (error) {
-        _log('backup TXT não salvo: ${_errorDescriber.describe(error)}');
-        _messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Backup TXT não salvo: ${_errorDescriber.describe(error)}',
-            ),
-          ),
-        );
-      }
-      await Clipboard.setData(ClipboardData(text: backup));
-      _log(
-        file == null
-            ? 'backup TXT copiado: ${snapshot.notes.length} nota(s), '
-                  '${snapshot.scheduledNotifications.length} notificação(ões)'
-            : 'backup TXT salvo e copiado: ${file.path}',
-      );
-      if (file != null) {
-        _log(
-          'backup inclui ${snapshot.notes.length} nota(s), '
-          '${snapshot.scheduledNotifications.length} notificação(ões)',
-        );
-      }
-    });
-  }
-
-  Future<File> _writeManualBackupFile(String backup) async {
-    final directory = await _manualBackupDirectory();
-    final timestamp = _backupFileTimestamp(DateTime.now());
-    final file = File(
-      '${directory.path}${Platform.pathSeparator}curio-backup-$timestamp.txt',
-    );
-    await file.writeAsString(backup, flush: true);
-    return file;
-  }
-
-  Future<Directory> _manualBackupDirectory() async {
-    try {
-      final downloads = await getDownloadsDirectory();
-      if (downloads != null) {
-        return downloads;
-      }
-    } on Object {
-      // Android may not expose a public Downloads directory through path_provider.
-    }
-    return getApplicationDocumentsDirectory();
-  }
-
-  Future<void> _showRestoreBackupDialog() async {
-    final controller = TextEditingController();
-    try {
-      final clipboard = await Clipboard.getData('text/plain');
-      controller.text = clipboard?.text ?? '';
-      controller.selection = TextSelection.collapsed(
-        offset: controller.text.length,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      final backupText = await showDialog<String>(
-        context: _dialogContext,
-        builder: (context) {
-          return AlertDialog(
-            title: const Text('Restaurar backup TXT'),
-            content: SizedBox(
-              width: 620,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Cole o TXT gerado pelo Curió. A restauração substitui '
-                    'as notas e notificações locais e reagenda alertas futuros.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: controller,
-                    autofocus: controller.text.trim().isEmpty,
-                    minLines: 12,
-                    maxLines: 18,
-                    keyboardType: TextInputType.multiline,
-                    decoration: const InputDecoration(
-                      alignLabelWithHint: true,
-                      labelText: 'Backup TXT',
-                      hintText: 'Curió Backup TXT...',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(controller.text),
-                child: const Text('Restaurar'),
-              ),
-            ],
-          );
-        },
-      );
-
-      if (backupText == null || backupText.trim().isEmpty) {
-        return;
-      }
-
-      final restored = _manualBackupCodec.decode(backupText);
-      await _restoreManualBackup(restored);
-    } on ManualBackupException catch (error) {
-      _log('backup não restaurado: ${error.message}');
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Backup não restaurado: ${error.message}')),
-      );
-    } on Object catch (error) {
-      _log('backup não restaurado: ${_errorDescriber.describe(error)}');
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Backup não restaurado: ${_errorDescriber.describe(error)}',
-          ),
-        ),
-      );
-    } finally {
-      controller.dispose();
-    }
-  }
-
-  Future<void> _restoreManualBackup(AppSnapshot backupSnapshot) async {
-    await _runAction(() async {
-      final current = _snapshot;
-      if (current == null) {
-        return;
-      }
-
-      final nowUtc = DateTime.now().toUtc();
-      final futureRecords = backupSnapshot.scheduledNotifications
-          .where((record) => record.scheduledForUtc.toUtc().isAfter(nowUtc))
-          .toList();
-      if (futureRecords.isNotEmpty) {
-        final authorized = await _ensureNotificationCreationAuthorization();
-        if (!authorized) {
-          _log('backup não restaurado: autorização de notificação pendente');
-          return;
-        }
-      }
-
-      final rescheduled = <ScheduledNotificationRecord>[];
-      for (final record in futureRecords) {
-        final intent = ReminderIntent.oneShot(
-          id: record.reminderIntentId,
-          ownerId: record.ownerId,
-          ownerType: record.ownerType,
-          instantUtc: record.scheduledForUtc,
-          updatedAtUtc: nowUtc,
-          timeZone: widget.notifications.localTimeZoneId,
-        );
-        try {
-          final result = await widget.notifications.scheduleReminder(
-            intent: intent,
-            deviceId: _deviceId,
-            title: record.title.trim().isEmpty
-                ? 'Notificação'
-                : record.title.trim(),
-            body: record.body.trim(),
-          );
-          if (result != null) {
-            rescheduled.add(result.record);
-            if (mounted) {
-              setState(() => _permissionState = result.permissionState);
-            } else {
-              _permissionState = result.permissionState;
-            }
-          } else {
-            for (final scheduled in rescheduled) {
-              await widget.notifications.cancel(scheduled.id);
-            }
-            _log('backup não restaurado: notificação sem próxima ocorrência');
-            return;
-          }
-        } on Object catch (error) {
-          for (final scheduled in rescheduled) {
-            await widget.notifications.cancel(scheduled.id);
-          }
-          _log(
-            'backup não restaurado: notificação não agendada '
-            '(${_errorDescriber.describe(error)})',
-          );
-          return;
-        }
-      }
-
-      for (final record in current.scheduledNotifications) {
-        try {
-          await widget.notifications.cancel(record.id);
-        } on Object catch (error) {
-          _log(
-            'notificação antiga não cancelada: '
-            '${_errorDescriber.describe(error)}',
-          );
-        }
-      }
-
-      final futureIds = futureRecords.map((record) => record.id).toSet();
-      final retainedRecords = backupSnapshot.scheduledNotifications
-          .where((record) => !futureIds.contains(record.id))
-          .toList();
-      final next = backupSnapshot.copyWith(
-        scheduledNotifications: <ScheduledNotificationRecord>[
-          ...rescheduled,
-          ...retainedRecords,
-        ],
-      );
-
-      await _saveSnapshot(next);
-      _syncSelectionAfterSnapshot(next);
-      if (mounted) {
-        setState(() {
-          _notificationComposerOpen = false;
-          _selectedIndex = 4;
-        });
-      } else {
-        _notificationComposerOpen = false;
-        _selectedIndex = 4;
-      }
-      await _refreshPendingCount();
-      _log(
-        'backup TXT restaurado: ${next.notes.length} nota(s), '
-        '${next.scheduledNotifications.length} notificação(ões)',
-      );
-    });
-  }
-
-  Future<void> _runSync() async {
-    await _runAction(() async {
-      final snapshot = _snapshot;
-      if (snapshot == null) {
-        return;
-      }
-
-      final serverUrl = _syncSettingsValidator.normalizeServerUrl(
-        _syncServerController.text,
-      );
-      final authToken = _syncTokenController.text.trim();
-      _syncSettingsValidator.validate(
-        serverUrl: serverUrl,
-        authToken: authToken,
-      );
-      final adapter = serverUrl.isEmpty
-          ? const OfflineSyncAdapter()
-          : HttpSyncAdapter(
-              serverUrl: Uri.parse(serverUrl),
-              authToken: authToken,
-              allowInsecureHttp: kDebugMode,
-            );
-      try {
-        final result = await adapter.synchronize(
-          snapshot: snapshot,
-          deviceId: _deviceId,
-        );
-        final latestSnapshot = _snapshot ?? snapshot;
-        final syncedSnapshot = const SnapshotSyncMerger().merge(
-          local: latestSnapshot,
-          remote: result.snapshot,
-        );
-        await _saveSnapshot(syncedSnapshot);
-
-        final settings = _syncSettings.copyWith(
-          serverUrl: serverUrl,
-          authToken: authToken,
-          lastMessage: result.message,
-          lastSyncedAtUtc: result.finishedAtUtc,
-        );
-        await widget.syncSettings.save(settings);
-        _syncSelectionAfterSnapshot(syncedSnapshot);
-        final visibleResult = SyncResult(
-          startedAtUtc: result.startedAtUtc,
-          finishedAtUtc: result.finishedAtUtc,
-          snapshot: syncedSnapshot,
-          pushedRecords: result.pushedRecords,
-          pulledRecords: result.pulledRecords,
-          tombstones: syncedSnapshot.deletedRecords.length,
-          message: result.message,
-        );
-        setState(() {
-          _lastSyncResult = visibleResult;
-          _syncSettings = settings;
-          _syncServerController.text = serverUrl;
-          _syncTokenController.text = authToken;
-        });
-        _log(result.message);
-      } finally {
-        if (adapter is HttpSyncAdapter) {
-          adapter.dispose();
-        }
-      }
-    });
-  }
-
-  Future<void> _startSyncSidecar() async {
-    if (!_syncSidecarSupported) {
-      return;
-    }
-
-    await _runAction(() async {
-      var authToken = _syncTokenController.text.trim();
-      if (authToken.isEmpty) {
-        authToken = _generateSyncToken();
-      }
-
-      final state = await _syncSidecar.start(token: authToken);
-      final settings = _syncSettings.copyWith(
-        authToken: authToken,
-        lastMessage: 'servidor local ativo',
-      );
-      await widget.syncSettings.save(settings);
-      setState(() {
-        _syncSidecarState = state;
-        _syncSettings = settings;
-        _syncTokenController.text = authToken;
-      });
-      _log('servidor local de sync iniciado');
-    });
-  }
-
-  Future<void> _stopSyncSidecar() async {
-    await _runAction(() async {
-      await _syncSidecar.stop();
-      final settings = _syncSettings.copyWith(
-        lastMessage: 'servidor local parado',
-      );
-      await widget.syncSettings.save(settings);
-      setState(() {
-        _syncSidecarState = null;
-        _syncSettings = settings;
-      });
-      _log('servidor local de sync parado');
-    });
-  }
-
+  @override
   void _syncSelectionAfterSnapshot(AppSnapshot snapshot) {
     final selectedId = _selectedNoteId;
     final selected = selectedId == null
@@ -1538,15 +1021,6 @@ final class _CurioAppState extends State<CurioApp> {
     final nextSelected = selected ?? snapshot.notes.firstOrNull;
     _selectedNoteId = nextSelected?.id;
     _noteController.text = nextSelected?.body ?? '';
-  }
-
-  bool get _syncSidecarSupported =>
-      defaultTargetPlatform == TargetPlatform.windows;
-
-  String _generateSyncToken() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
-    return base64Url.encode(bytes).replaceAll('=', '');
   }
 
   void _refreshLocalAlarmTimers(
@@ -1574,15 +1048,10 @@ final class _CurioAppState extends State<CurioApp> {
   }
 
   Future<void> _startLocalAlarm(ScheduledNotificationRecord record) async {
-    if (mounted) {
-      setState(() {
-        _activeAlarmRecord = record;
-        _selectedIndex = 0;
-      });
-    } else {
+    _applyState(() {
       _activeAlarmRecord = record;
-      _selectedIndex = 0;
-    }
+      _selectedIndex = _AppTab.today.index;
+    });
 
     final result = await widget.alarmPlayback.start(
       _alarmSettings,
@@ -1596,11 +1065,7 @@ final class _CurioAppState extends State<CurioApp> {
 
   Future<void> _stopLocalAlarm() async {
     await widget.alarmPlayback.stop();
-    if (mounted) {
-      setState(() => _activeAlarmRecord = null);
-    } else {
-      _activeAlarmRecord = null;
-    }
+    _applyState(() => _activeAlarmRecord = null);
     _log('alarme contínuo parado');
   }
 
@@ -1658,7 +1123,7 @@ final class _CurioAppState extends State<CurioApp> {
       await _refreshPendingCount();
       setState(() {
         _activeAlarmRecord = null;
-        _selectedIndex = 0;
+        _selectedIndex = _AppTab.today.index;
       });
       _log('alarme adiado 5 min: ${formatLocalDateTime(scheduledAtUtc)}');
     });
@@ -1667,11 +1132,7 @@ final class _CurioAppState extends State<CurioApp> {
   Future<void> _cancelActiveAlarm() async {
     final record = _activeAlarmRecord;
     await widget.alarmPlayback.stop();
-    if (mounted) {
-      setState(() => _activeAlarmRecord = null);
-    } else {
-      _activeAlarmRecord = null;
-    }
+    _applyState(() => _activeAlarmRecord = null);
     if (record == null) {
       _log('alarme cancelado');
       return;
@@ -1679,55 +1140,44 @@ final class _CurioAppState extends State<CurioApp> {
     await _cancelNotification(record);
   }
 
-  Future<void> _saveSnapshot(AppSnapshot snapshot) async {
-    await _snapshotWrites.save(snapshot);
-    _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
+  /// Applies [mutate] inside `setState` when still mounted, or directly when
+  /// not — so state changes that land after an `await` still take effect even
+  /// if the widget was disposed in the meantime.
+  @override
+  void _applyState(VoidCallback mutate) {
     if (mounted) {
-      setState(() => _snapshot = snapshot);
+      setState(mutate);
     } else {
-      _snapshot = snapshot;
+      mutate();
     }
   }
 
+  @override
+  Future<void> _saveSnapshot(AppSnapshot snapshot) async {
+    await _snapshotWrites.save(snapshot);
+    _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
+    _applyState(() => _snapshot = snapshot);
+  }
+
+  @override
   Future<String?> _promptText({
     required String title,
     required String hint,
     String initialValue = '',
     String confirmLabel = 'Salvar',
-  }) async {
-    final controller = TextEditingController(text: initialValue);
-    controller.selection = TextSelection.collapsed(offset: initialValue.length);
-    try {
-      return showDialog<String>(
-        context: _dialogContext,
-        builder: (context) {
-          return AlertDialog(
-            title: Text(title),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: InputDecoration(hintText: hint),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (value) => Navigator.of(context).pop(value),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(controller.text),
-                child: Text(confirmLabel),
-              ),
-            ],
-          );
-        },
-      );
-    } finally {
-      controller.dispose();
-    }
+  }) {
+    return showDialog<String>(
+      context: _dialogContext,
+      builder: (context) => _TextPromptDialog(
+        title: title,
+        hint: hint,
+        initialValue: initialValue,
+        confirmLabel: confirmLabel,
+      ),
+    );
   }
 
+  @override
   Future<void> _runAction(Future<void> Function() action) async {
     if (!_actionGate.tryEnter()) {
       return;
@@ -1749,6 +1199,7 @@ final class _CurioAppState extends State<CurioApp> {
     }
   }
 
+  @override
   void _log(String message) {
     if (!mounted) {
       _activity.insert(0, message);
@@ -1904,7 +1355,7 @@ final class _CurioAppState extends State<CurioApp> {
                     controller: _noteController,
                     onOpenCalendar: () => setState(() {
                       _agendaDate = _notesDate;
-                      _selectedIndex = 1;
+                      _selectedIndex = _AppTab.agenda.index;
                     }),
                     onToggleNotificationComposer: () =>
                         unawaited(_openNotificationComposerForSelectedNote()),
@@ -1922,6 +1373,21 @@ final class _CurioAppState extends State<CurioApp> {
                     onRestoreRevision: (NoteEditRevision revision) =>
                         unawaited(_restoreNoteRevision(revision)),
                     onBodyChanged: _updateSelectedNoteBody,
+                  ),
+                  TasksView(
+                    tasks: appSnapshot.tasks,
+                    filter: _taskFilter,
+                    busy: _busy,
+                    selectedNoteTitle: _selectedNote(appSnapshot)?.title,
+                    onFilterChanged: _setTaskFilter,
+                    onAddTask: _addTask,
+                    onCreateFromNote: () =>
+                        unawaited(_createTaskFromSelectedNote()),
+                    onToggleDone: (task) => unawaited(_toggleTaskDone(task)),
+                    onRename: (task) => unawaited(_renameTask(task)),
+                    onSetDue: (task) => unawaited(_setTaskDue(task)),
+                    onClearDue: (task) => unawaited(_clearTaskDue(task)),
+                    onDelete: (task) => unawaited(_deleteTask(task)),
                   ),
                   SyncView(
                     busy: _busy,
@@ -1947,6 +1413,9 @@ final class _CurioAppState extends State<CurioApp> {
                     onExportCalendarIcs: () => unawaited(_exportCalendarIcs()),
                     onImportCalendarIcs: () => unawaited(_importCalendarIcs()),
                     onSync: _runSync,
+                    onApplyPairing: (code) =>
+                        unawaited(_applyPairingCode(code)),
+                    onClearPin: () => unawaited(_clearPinnedCert()),
                     onCopyBackup: () => unawaited(_copyManualBackup()),
                     onRestoreBackup: () =>
                         unawaited(_showRestoreBackupDialog()),
@@ -2067,7 +1536,7 @@ ReminderIntent _calendarImportReminderIntent({
   required String timeZone,
 }) {
   final recurrence = event.supportedRecurrence;
-  final intentId = _calendarEventReminderId(event);
+  final intentId = event.reminderId;
   if (recurrence == null) {
     return ReminderIntent.oneShot(
       id: intentId,
@@ -2106,22 +1575,6 @@ ReminderIntent _calendarImportReminderIntent({
   };
 }
 
-String _calendarEventReminderId(CalendarIcsEvent event) {
-  final source = event.uid.trim().isEmpty
-      ? '${event.title}|${event.startsAtUtc.toUtc().toIso8601String()}'
-      : event.uid.trim();
-  return 'ics-${_stableHex(source)}';
-}
-
-String _stableHex(String value) {
-  var hash = 0x811c9dc5;
-  for (final codeUnit in value.codeUnits) {
-    hash ^= codeUnit;
-    hash = (hash * 0x01000193) & 0xffffffff;
-  }
-  return hash.toRadixString(16).padLeft(8, '0');
-}
-
 String _backupFileTimestamp(DateTime value) {
   final local = value.toLocal();
   return '${local.year}'
@@ -2140,6 +1593,39 @@ AppSnapshot _withDeletedRecord(AppSnapshot snapshot, DeletedRecord record) {
         (candidate) => candidate.key != record.key,
       ),
     ],
+  );
+}
+
+/// Upserts the syncable [intent] into the snapshot's reminder list (the layer
+/// replicated across devices); the per-device scheduled record stays local.
+AppSnapshot _withReminderIntent(AppSnapshot snapshot, ReminderIntent intent) {
+  return snapshot.copyWith(
+    reminders: <ReminderIntent>[
+      intent,
+      ...snapshot.reminders.where((candidate) => candidate.id != intent.id),
+    ],
+  );
+}
+
+/// Removes a reminder intent and leaves a tombstone so the deletion replicates
+/// instead of being resurrected by an older snapshot from another device.
+AppSnapshot _withoutReminderIntent(
+  AppSnapshot snapshot,
+  String intentId,
+  String deviceId,
+) {
+  return _withDeletedRecord(
+    snapshot.copyWith(
+      reminders: snapshot.reminders
+          .where((candidate) => candidate.id != intentId)
+          .toList(),
+    ),
+    DeletedRecord(
+      recordType: SyncRecordType.reminder,
+      recordId: intentId,
+      deletedAtUtc: DateTime.now().toUtc(),
+      deviceId: deviceId,
+    ),
   );
 }
 
@@ -2213,6 +1699,68 @@ final class _StartupErrorScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Text prompt dialog
+// ---------------------------------------------------------------------------
+
+final class _TextPromptDialog extends StatefulWidget {
+  const _TextPromptDialog({
+    required this.title,
+    required this.hint,
+    required this.initialValue,
+    required this.confirmLabel,
+  });
+
+  final String title;
+  final String hint;
+  final String initialValue;
+  final String confirmLabel;
+
+  @override
+  State<_TextPromptDialog> createState() => _TextPromptDialogState();
+}
+
+final class _TextPromptDialogState extends State<_TextPromptDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue)
+      ..selection = TextSelection.collapsed(offset: widget.initialValue.length);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(hintText: widget.hint),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: Text(widget.confirmLabel),
+        ),
+      ],
     );
   }
 }
@@ -2386,18 +1934,43 @@ final class _HomeShell extends StatelessWidget {
   }
 
   List<_DestinationItem> _destinations() {
-    return const <_DestinationItem>[
-      _DestinationItem('Hoje', Icons.today_outlined, Icons.today),
-      _DestinationItem(
-        'Agenda',
-        Icons.calendar_month_outlined,
-        Icons.calendar_month,
-      ),
-      _DestinationItem('Quadro', Icons.view_kanban_outlined, Icons.view_kanban),
-      _DestinationItem('Notas', Icons.notes_outlined, Icons.notes),
-      _DestinationItem('Sync', Icons.sync_outlined, Icons.sync),
-    ];
+    return _AppTab.values.map(_destinationFor).toList();
   }
+}
+
+_DestinationItem _destinationFor(_AppTab tab) {
+  return switch (tab) {
+    _AppTab.today => const _DestinationItem(
+      'Hoje',
+      Icons.today_outlined,
+      Icons.today,
+    ),
+    _AppTab.agenda => const _DestinationItem(
+      'Agenda',
+      Icons.calendar_month_outlined,
+      Icons.calendar_month,
+    ),
+    _AppTab.board => const _DestinationItem(
+      'Quadro',
+      Icons.view_kanban_outlined,
+      Icons.view_kanban,
+    ),
+    _AppTab.notes => const _DestinationItem(
+      'Notas',
+      Icons.notes_outlined,
+      Icons.notes,
+    ),
+    _AppTab.tasks => const _DestinationItem(
+      'Tarefas',
+      Icons.task_alt_outlined,
+      Icons.task_alt,
+    ),
+    _AppTab.sync => const _DestinationItem(
+      'Sync',
+      Icons.sync_outlined,
+      Icons.sync,
+    ),
+  };
 }
 
 final class _DestinationItem {

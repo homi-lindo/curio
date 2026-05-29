@@ -11,6 +11,7 @@ final class SyncSettings {
   const SyncSettings({
     this.serverUrl = '',
     this.authToken = '',
+    this.pinnedCertSha256 = '',
     this.lastMessage,
     this.lastSyncedAtUtc,
   });
@@ -19,6 +20,7 @@ final class SyncSettings {
     return SyncSettings(
       serverUrl: json['serverUrl'] as String? ?? '',
       authToken: json['authToken'] as String? ?? '',
+      pinnedCertSha256: json['pinnedCertSha256'] as String? ?? '',
       lastMessage: json['lastMessage'] as String?,
       lastSyncedAtUtc: _optionalDate(json['lastSyncedAtUtc']),
     );
@@ -26,18 +28,25 @@ final class SyncSettings {
 
   final String serverUrl;
   final String authToken;
+
+  /// SHA-256 fingerprint (lowercase hex) of the server's TLS certificate to
+  /// pin, enabling a self-signed certificate to be trusted. Empty = standard CA
+  /// validation. Not a secret, so it lives in the settings file.
+  final String pinnedCertSha256;
   final String? lastMessage;
   final DateTime? lastSyncedAtUtc;
 
   SyncSettings copyWith({
     String? serverUrl,
     String? authToken,
+    String? pinnedCertSha256,
     String? lastMessage,
     DateTime? lastSyncedAtUtc,
   }) {
     return SyncSettings(
       serverUrl: serverUrl ?? this.serverUrl,
       authToken: authToken ?? this.authToken,
+      pinnedCertSha256: pinnedCertSha256 ?? this.pinnedCertSha256,
       lastMessage: lastMessage ?? this.lastMessage,
       lastSyncedAtUtc: lastSyncedAtUtc ?? this.lastSyncedAtUtc,
     );
@@ -46,6 +55,7 @@ final class SyncSettings {
   Map<String, Object?> toJson() {
     return <String, Object?>{
       'serverUrl': serverUrl,
+      'pinnedCertSha256': pinnedCertSha256,
       'lastMessage': lastMessage,
       'lastSyncedAtUtc': lastSyncedAtUtc?.toUtc().toIso8601String(),
     };

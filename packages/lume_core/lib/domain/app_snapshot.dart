@@ -2,7 +2,7 @@ import 'reminder.dart';
 
 enum TaskStatus { open, done }
 
-enum SyncRecordType { task, note }
+enum SyncRecordType { task, note, reminder }
 
 final class TaskItem {
   const TaskItem({
@@ -178,6 +178,7 @@ final class AppSnapshot {
     required this.tasks,
     required this.notes,
     required this.scheduledNotifications,
+    this.reminders = const <ReminderIntent>[],
     this.deletedRecords = const <DeletedRecord>[],
   });
 
@@ -188,6 +189,9 @@ final class AppSnapshot {
       scheduledNotifications: _listOfMaps(
         json['scheduledNotifications'],
       ).map(ScheduledNotificationRecord.fromJson).toList(),
+      reminders: _listOfMaps(
+        json['reminders'],
+      ).map(ReminderIntent.fromJson).toList(),
       deletedRecords: _listOfMaps(
         json['deletedRecords'],
       ).map(DeletedRecord.fromJson).toList(),
@@ -215,12 +219,14 @@ final class AppSnapshot {
   final List<TaskItem> tasks;
   final List<NoteItem> notes;
   final List<ScheduledNotificationRecord> scheduledNotifications;
+  final List<ReminderIntent> reminders;
   final List<DeletedRecord> deletedRecords;
 
   AppSnapshot copyWith({
     List<TaskItem>? tasks,
     List<NoteItem>? notes,
     List<ScheduledNotificationRecord>? scheduledNotifications,
+    List<ReminderIntent>? reminders,
     List<DeletedRecord>? deletedRecords,
   }) {
     return AppSnapshot(
@@ -228,18 +234,20 @@ final class AppSnapshot {
       notes: notes ?? this.notes,
       scheduledNotifications:
           scheduledNotifications ?? this.scheduledNotifications,
+      reminders: reminders ?? this.reminders,
       deletedRecords: deletedRecords ?? this.deletedRecords,
     );
   }
 
   Map<String, Object?> toJson() {
     return <String, Object?>{
-      'schemaVersion': 4,
+      'schemaVersion': 5,
       'tasks': tasks.map((task) => task.toJson()).toList(),
       'notes': notes.map((note) => note.toJson()).toList(),
       'scheduledNotifications': scheduledNotifications
           .map((record) => record.toJson())
           .toList(),
+      'reminders': reminders.map((reminder) => reminder.toJson()).toList(),
       'deletedRecords': deletedRecords
           .map((record) => record.toJson())
           .toList(),

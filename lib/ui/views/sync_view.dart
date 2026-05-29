@@ -41,6 +41,8 @@ final class SyncView extends StatelessWidget {
     required this.onExportCalendarIcs,
     required this.onImportCalendarIcs,
     required this.onSync,
+    required this.onApplyPairing,
+    required this.onClearPin,
     required this.onCopyBackup,
     required this.onRestoreBackup,
     required this.onStartSidecar,
@@ -69,6 +71,8 @@ final class SyncView extends StatelessWidget {
   final VoidCallback onExportCalendarIcs;
   final VoidCallback onImportCalendarIcs;
   final VoidCallback onSync;
+  final ValueChanged<String> onApplyPairing;
+  final VoidCallback onClearPin;
   final VoidCallback onCopyBackup;
   final VoidCallback onRestoreBackup;
   final VoidCallback onStartSidecar;
@@ -163,6 +167,45 @@ final class SyncView extends StatelessWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                const SizedBox(height: 16),
+                Text(
+                  'Pareamento rápido',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Cole o código que o servidor self-hosted mostra ao iniciar. '
+                  'Ele preenche servidor, token e fixa o certificado — HTTPS '
+                  'seguro sem precisar de domínio ou autoridade certificadora.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                _PairingField(busy: busy, onApply: onApplyPairing),
+                if (settings.pinnedCertSha256.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: StatusPill(
+                          icon: Icons.verified_user_outlined,
+                          label:
+                              'Certificado fixado · '
+                              '${settings.pinnedCertSha256.substring(0, 12)}…',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: busy ? null : onClearPin,
+                        icon: const Icon(Icons.link_off_outlined),
+                        label: const Text('Remover'),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -663,6 +706,74 @@ final class _SegmentedControlRow<T> extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+final class _PairingField extends StatefulWidget {
+  const _PairingField({required this.busy, required this.onApply});
+
+  final bool busy;
+  final ValueChanged<String> onApply;
+
+  @override
+  State<_PairingField> createState() => _PairingFieldState();
+}
+
+final class _PairingFieldState extends State<_PairingField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    final code = _controller.text.trim();
+    if (code.isEmpty) {
+      return;
+    }
+    widget.onApply(code);
+    _controller.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Expanded(
+          child: TextField(
+            controller: _controller,
+            enabled: !widget.busy,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.qr_code_2_outlined),
+              labelText: 'Código de pareamento',
+              hintText: 'curio-pair…',
+            ),
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _apply(),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: FilledButton.tonalIcon(
+            onPressed: widget.busy ? null : _apply,
+            icon: const Icon(Icons.link_outlined),
+            label: const Text('Parear'),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -196,6 +196,31 @@ final class CalendarIcsEvent {
   CalendarIcsRecurrence? get supportedRecurrence {
     return CalendarIcsRecurrence.tryParse(recurrenceRule, startsAtUtc);
   }
+
+  /// Stable reminder/intent id for this event. Uses the calendar `UID` when
+  /// present (so re-importing the same event updates it instead of
+  /// duplicating); otherwise derives from title + start instant. Two events
+  /// that share this id are the same logical event.
+  String get reminderId {
+    final source = uid.trim().isEmpty
+        ? '$title|${startsAtUtc.toUtc().toIso8601String()}'
+        : uid.trim();
+    return 'ics-${_stableHex(source)}';
+  }
+}
+
+String _stableHex(String value) {
+  // Two independent 32-bit FNV-1a lanes (different seeds) concatenated into a
+  // 64-bit hex digest — keeps each lane in unsigned 32-bit range while making
+  // collisions negligible for realistic calendar volumes.
+  var lane1 = 0x811c9dc5;
+  var lane2 = 0x811c9dc5 ^ 0x9e3779b9;
+  for (final codeUnit in value.codeUnits) {
+    lane1 = ((lane1 ^ codeUnit) * 0x01000193) & 0xffffffff;
+    lane2 = ((lane2 ^ codeUnit) * 0x01000193) & 0xffffffff;
+  }
+  return lane1.toRadixString(16).padLeft(8, '0') +
+      lane2.toRadixString(16).padLeft(8, '0');
 }
 
 enum CalendarIcsRecurrenceKind { daily, weekly }

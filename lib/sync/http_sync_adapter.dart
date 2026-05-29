@@ -3,18 +3,22 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
+import 'package:lume_core/sync/sync_pairing.dart';
 
 final class HttpSyncAdapter implements SyncAdapter {
   HttpSyncAdapter({
     required this.serverUrl,
     String authToken = '',
+    String pinnedCertSha256 = '',
     this.allowInsecureHttp = false,
     this.networkTimeout = _defaultSyncNetworkTimeout,
     this.maxResponseBytes = _defaultMaxSyncResponseBytes,
     HttpClient? client,
   }) : authToken = authToken.trim(),
+       pinnedCertSha256 = SyncPairing.normalizeFingerprint(pinnedCertSha256),
        _client = client ?? (HttpClient()..connectionTimeout = networkTimeout) {
     if (maxResponseBytes <= 0) {
       throw ArgumentError.value(
@@ -31,16 +35,31 @@ final class HttpSyncAdapter implements SyncAdapter {
       );
     }
     _validateServerUrl(serverUrl, allowInsecureHttp: allowInsecureHttp);
+
+    // Pin the server certificate by SHA-256 fingerprint. This makes a
+    // self-signed certificate trustworthy (and only that exact certificate),
+    // so a self-hosted box works over HTTPS without a public CA. When no pin is
+    // set, the default platform validation applies and self-signed is rejected.
+    if (this.pinnedCertSha256.isNotEmpty) {
+      _client.badCertificateCallback = (cert, host, port) =>
+          _certMatchesPin(cert);
+    }
   }
 
   final Uri serverUrl;
   final String authToken;
+  final String pinnedCertSha256;
   final bool allowInsecureHttp;
   final Duration networkTimeout;
   final int maxResponseBytes;
   final HttpClient _client;
   final SnapshotSyncMerger _merger = const SnapshotSyncMerger();
   bool _disposed = false;
+
+  bool _certMatchesPin(X509Certificate cert) {
+    final fingerprint = sha256.convert(cert.der).toString().toLowerCase();
+    return fingerprint == pinnedCertSha256;
+  }
 
   void dispose() {
     if (_disposed) return;

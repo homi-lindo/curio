@@ -60,19 +60,40 @@ class DeletedRecordRows extends Table {
   Set<Column<Object>> get primaryKey => <Column<Object>>{recordType, recordId};
 }
 
+class ReminderRows extends Table {
+  TextColumn get id => text()();
+  TextColumn get ownerId => text()();
+  TextColumn get ownerType => text()();
+  TextColumn get kind => text()();
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
+  TextColumn get timeZone => text().withDefault(const Constant('UTC'))();
+  DateTimeColumn get instantUtc => dateTime().nullable()();
+  IntColumn get localTimeHour => integer().nullable()();
+  IntColumn get localTimeMinute => integer().nullable()();
+  DateTimeColumn get anchorLocalDate => dateTime().nullable()();
+  IntColumn get byWeekday => integer().nullable()();
+  DateTimeColumn get updatedAtUtc => dateTime()();
+  TextColumn get title => text().withDefault(const Constant(''))();
+  TextColumn get body => text().withDefault(const Constant(''))();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{id};
+}
+
 @DriftDatabase(
   tables: <Type>[
     TaskRows,
     NoteRows,
     ScheduledNotificationRows,
     DeletedRecordRows,
+    ReminderRows,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -101,6 +122,9 @@ class AppDatabase extends _$AppDatabase {
             scheduledNotificationRows.body,
           );
         }
+        if (from < 6) {
+          await migrator.createTable(reminderRows);
+        }
       },
     );
   }
@@ -110,7 +134,13 @@ class AppDatabase extends _$AppDatabase {
     final noteCount = await _count(noteRows);
     final notificationCount = await _count(scheduledNotificationRows);
     final deletedCount = await _count(deletedRecordRows);
-    return taskCount + noteCount + notificationCount + deletedCount > 0;
+    final reminderCount = await _count(reminderRows);
+    return taskCount +
+            noteCount +
+            notificationCount +
+            deletedCount +
+            reminderCount >
+        0;
   }
 
   Future<AppSnapshot> loadSnapshot() async {
@@ -139,11 +169,18 @@ class AppDatabase extends _$AppDatabase {
                 (table) => OrderingTerm.desc(table.deletedAtUtc),
               ]))
             .get();
+    final reminders =
+        await (select(reminderRows)
+              ..orderBy(<OrderingTerm Function($ReminderRowsTable)>[
+                (table) => OrderingTerm.desc(table.updatedAtUtc),
+              ]))
+            .get();
 
     return AppSnapshot(
       tasks: tasks.map(_taskFromRow).toList(),
       notes: notes.map(_noteFromRow).toList(),
       scheduledNotifications: notifications.map(_notificationFromRow).toList(),
+      reminders: reminders.map(_reminderFromRow).toList(),
       deletedRecords: deletedRecords.map(_deletedRecordFromRow).toList(),
     );
   }
@@ -154,6 +191,7 @@ class AppDatabase extends _$AppDatabase {
       await delete(deletedRecordRows).go();
       await delete(taskRows).go();
       await delete(noteRows).go();
+      await delete(reminderRows).go();
 
       await batch((batch) {
         batch.insertAllOnConflictUpdate(
@@ -169,6 +207,10 @@ class AppDatabase extends _$AppDatabase {
           snapshot.scheduledNotifications
               .map(_notificationToCompanion)
               .toList(),
+        );
+        batch.insertAllOnConflictUpdate(
+          reminderRows,
+          snapshot.reminders.map(_reminderToCompanion).toList(),
         );
         batch.insertAllOnConflictUpdate(
           deletedRecordRows,
@@ -284,5 +326,46 @@ DeletedRecordRowsCompanion _deletedRecordToCompanion(DeletedRecord record) {
     recordId: record.recordId,
     deletedAtUtc: record.deletedAtUtc,
     deviceId: record.deviceId,
+  );
+}
+
+ReminderIntent _reminderFromRow(ReminderRow row) {
+  final hour = row.localTimeHour;
+  final minute = row.localTimeMinute;
+  return ReminderIntent(
+    id: row.id,
+    ownerId: row.ownerId,
+    ownerType: ReminderOwnerType.values.byName(row.ownerType),
+    kind: ScheduleKind.values.byName(row.kind),
+    enabled: row.enabled,
+    timeZone: row.timeZone,
+    instantUtc: row.instantUtc?.toUtc(),
+    localTime: (hour != null && minute != null)
+        ? LocalClockTime(hour: hour, minute: minute)
+        : null,
+    anchorLocalDate: row.anchorLocalDate,
+    byWeekday: row.byWeekday,
+    updatedAtUtc: row.updatedAtUtc.toUtc(),
+    title: row.title,
+    body: row.body,
+  );
+}
+
+ReminderRowsCompanion _reminderToCompanion(ReminderIntent reminder) {
+  return ReminderRowsCompanion.insert(
+    id: reminder.id,
+    ownerId: reminder.ownerId,
+    ownerType: reminder.ownerType.name,
+    kind: reminder.kind.name,
+    enabled: Value(reminder.enabled),
+    timeZone: Value(reminder.timeZone),
+    instantUtc: Value(reminder.instantUtc),
+    localTimeHour: Value(reminder.localTime?.hour),
+    localTimeMinute: Value(reminder.localTime?.minute),
+    anchorLocalDate: Value(reminder.anchorLocalDate),
+    byWeekday: Value(reminder.byWeekday),
+    updatedAtUtc: reminder.updatedAtUtc,
+    title: Value(reminder.title),
+    body: Value(reminder.body),
   );
 }

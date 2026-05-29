@@ -1997,6 +1997,829 @@ class DeletedRecordRowsCompanion extends UpdateCompanion<DeletedRecordRow> {
   }
 }
 
+class $ReminderRowsTable extends ReminderRows
+    with TableInfo<$ReminderRowsTable, ReminderRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ReminderRowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ownerIdMeta = const VerificationMeta(
+    'ownerId',
+  );
+  @override
+  late final GeneratedColumn<String> ownerId = GeneratedColumn<String>(
+    'owner_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ownerTypeMeta = const VerificationMeta(
+    'ownerType',
+  );
+  @override
+  late final GeneratedColumn<String> ownerType = GeneratedColumn<String>(
+    'owner_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _enabledMeta = const VerificationMeta(
+    'enabled',
+  );
+  @override
+  late final GeneratedColumn<bool> enabled = GeneratedColumn<bool>(
+    'enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _timeZoneMeta = const VerificationMeta(
+    'timeZone',
+  );
+  @override
+  late final GeneratedColumn<String> timeZone = GeneratedColumn<String>(
+    'time_zone',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('UTC'),
+  );
+  static const VerificationMeta _instantUtcMeta = const VerificationMeta(
+    'instantUtc',
+  );
+  @override
+  late final GeneratedColumn<DateTime> instantUtc = GeneratedColumn<DateTime>(
+    'instant_utc',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _localTimeHourMeta = const VerificationMeta(
+    'localTimeHour',
+  );
+  @override
+  late final GeneratedColumn<int> localTimeHour = GeneratedColumn<int>(
+    'local_time_hour',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _localTimeMinuteMeta = const VerificationMeta(
+    'localTimeMinute',
+  );
+  @override
+  late final GeneratedColumn<int> localTimeMinute = GeneratedColumn<int>(
+    'local_time_minute',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _anchorLocalDateMeta = const VerificationMeta(
+    'anchorLocalDate',
+  );
+  @override
+  late final GeneratedColumn<DateTime> anchorLocalDate =
+      GeneratedColumn<DateTime>(
+        'anchor_local_date',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _byWeekdayMeta = const VerificationMeta(
+    'byWeekday',
+  );
+  @override
+  late final GeneratedColumn<int> byWeekday = GeneratedColumn<int>(
+    'by_weekday',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _updatedAtUtcMeta = const VerificationMeta(
+    'updatedAtUtc',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAtUtc = GeneratedColumn<DateTime>(
+    'updated_at_utc',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _bodyMeta = const VerificationMeta('body');
+  @override
+  late final GeneratedColumn<String> body = GeneratedColumn<String>(
+    'body',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    ownerId,
+    ownerType,
+    kind,
+    enabled,
+    timeZone,
+    instantUtc,
+    localTimeHour,
+    localTimeMinute,
+    anchorLocalDate,
+    byWeekday,
+    updatedAtUtc,
+    title,
+    body,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'reminder_rows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReminderRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('owner_id')) {
+      context.handle(
+        _ownerIdMeta,
+        ownerId.isAcceptableOrUnknown(data['owner_id']!, _ownerIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerIdMeta);
+    }
+    if (data.containsKey('owner_type')) {
+      context.handle(
+        _ownerTypeMeta,
+        ownerType.isAcceptableOrUnknown(data['owner_type']!, _ownerTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerTypeMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('enabled')) {
+      context.handle(
+        _enabledMeta,
+        enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta),
+      );
+    }
+    if (data.containsKey('time_zone')) {
+      context.handle(
+        _timeZoneMeta,
+        timeZone.isAcceptableOrUnknown(data['time_zone']!, _timeZoneMeta),
+      );
+    }
+    if (data.containsKey('instant_utc')) {
+      context.handle(
+        _instantUtcMeta,
+        instantUtc.isAcceptableOrUnknown(data['instant_utc']!, _instantUtcMeta),
+      );
+    }
+    if (data.containsKey('local_time_hour')) {
+      context.handle(
+        _localTimeHourMeta,
+        localTimeHour.isAcceptableOrUnknown(
+          data['local_time_hour']!,
+          _localTimeHourMeta,
+        ),
+      );
+    }
+    if (data.containsKey('local_time_minute')) {
+      context.handle(
+        _localTimeMinuteMeta,
+        localTimeMinute.isAcceptableOrUnknown(
+          data['local_time_minute']!,
+          _localTimeMinuteMeta,
+        ),
+      );
+    }
+    if (data.containsKey('anchor_local_date')) {
+      context.handle(
+        _anchorLocalDateMeta,
+        anchorLocalDate.isAcceptableOrUnknown(
+          data['anchor_local_date']!,
+          _anchorLocalDateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('by_weekday')) {
+      context.handle(
+        _byWeekdayMeta,
+        byWeekday.isAcceptableOrUnknown(data['by_weekday']!, _byWeekdayMeta),
+      );
+    }
+    if (data.containsKey('updated_at_utc')) {
+      context.handle(
+        _updatedAtUtcMeta,
+        updatedAtUtc.isAcceptableOrUnknown(
+          data['updated_at_utc']!,
+          _updatedAtUtcMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtUtcMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    }
+    if (data.containsKey('body')) {
+      context.handle(
+        _bodyMeta,
+        body.isAcceptableOrUnknown(data['body']!, _bodyMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ReminderRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReminderRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      ownerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_id'],
+      )!,
+      ownerType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_type'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      enabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}enabled'],
+      )!,
+      timeZone: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}time_zone'],
+      )!,
+      instantUtc: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}instant_utc'],
+      ),
+      localTimeHour: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}local_time_hour'],
+      ),
+      localTimeMinute: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}local_time_minute'],
+      ),
+      anchorLocalDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}anchor_local_date'],
+      ),
+      byWeekday: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}by_weekday'],
+      ),
+      updatedAtUtc: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at_utc'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      body: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}body'],
+      )!,
+    );
+  }
+
+  @override
+  $ReminderRowsTable createAlias(String alias) {
+    return $ReminderRowsTable(attachedDatabase, alias);
+  }
+}
+
+class ReminderRow extends DataClass implements Insertable<ReminderRow> {
+  final String id;
+  final String ownerId;
+  final String ownerType;
+  final String kind;
+  final bool enabled;
+  final String timeZone;
+  final DateTime? instantUtc;
+  final int? localTimeHour;
+  final int? localTimeMinute;
+  final DateTime? anchorLocalDate;
+  final int? byWeekday;
+  final DateTime updatedAtUtc;
+  final String title;
+  final String body;
+  const ReminderRow({
+    required this.id,
+    required this.ownerId,
+    required this.ownerType,
+    required this.kind,
+    required this.enabled,
+    required this.timeZone,
+    this.instantUtc,
+    this.localTimeHour,
+    this.localTimeMinute,
+    this.anchorLocalDate,
+    this.byWeekday,
+    required this.updatedAtUtc,
+    required this.title,
+    required this.body,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['owner_id'] = Variable<String>(ownerId);
+    map['owner_type'] = Variable<String>(ownerType);
+    map['kind'] = Variable<String>(kind);
+    map['enabled'] = Variable<bool>(enabled);
+    map['time_zone'] = Variable<String>(timeZone);
+    if (!nullToAbsent || instantUtc != null) {
+      map['instant_utc'] = Variable<DateTime>(instantUtc);
+    }
+    if (!nullToAbsent || localTimeHour != null) {
+      map['local_time_hour'] = Variable<int>(localTimeHour);
+    }
+    if (!nullToAbsent || localTimeMinute != null) {
+      map['local_time_minute'] = Variable<int>(localTimeMinute);
+    }
+    if (!nullToAbsent || anchorLocalDate != null) {
+      map['anchor_local_date'] = Variable<DateTime>(anchorLocalDate);
+    }
+    if (!nullToAbsent || byWeekday != null) {
+      map['by_weekday'] = Variable<int>(byWeekday);
+    }
+    map['updated_at_utc'] = Variable<DateTime>(updatedAtUtc);
+    map['title'] = Variable<String>(title);
+    map['body'] = Variable<String>(body);
+    return map;
+  }
+
+  ReminderRowsCompanion toCompanion(bool nullToAbsent) {
+    return ReminderRowsCompanion(
+      id: Value(id),
+      ownerId: Value(ownerId),
+      ownerType: Value(ownerType),
+      kind: Value(kind),
+      enabled: Value(enabled),
+      timeZone: Value(timeZone),
+      instantUtc: instantUtc == null && nullToAbsent
+          ? const Value.absent()
+          : Value(instantUtc),
+      localTimeHour: localTimeHour == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localTimeHour),
+      localTimeMinute: localTimeMinute == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localTimeMinute),
+      anchorLocalDate: anchorLocalDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(anchorLocalDate),
+      byWeekday: byWeekday == null && nullToAbsent
+          ? const Value.absent()
+          : Value(byWeekday),
+      updatedAtUtc: Value(updatedAtUtc),
+      title: Value(title),
+      body: Value(body),
+    );
+  }
+
+  factory ReminderRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReminderRow(
+      id: serializer.fromJson<String>(json['id']),
+      ownerId: serializer.fromJson<String>(json['ownerId']),
+      ownerType: serializer.fromJson<String>(json['ownerType']),
+      kind: serializer.fromJson<String>(json['kind']),
+      enabled: serializer.fromJson<bool>(json['enabled']),
+      timeZone: serializer.fromJson<String>(json['timeZone']),
+      instantUtc: serializer.fromJson<DateTime?>(json['instantUtc']),
+      localTimeHour: serializer.fromJson<int?>(json['localTimeHour']),
+      localTimeMinute: serializer.fromJson<int?>(json['localTimeMinute']),
+      anchorLocalDate: serializer.fromJson<DateTime?>(json['anchorLocalDate']),
+      byWeekday: serializer.fromJson<int?>(json['byWeekday']),
+      updatedAtUtc: serializer.fromJson<DateTime>(json['updatedAtUtc']),
+      title: serializer.fromJson<String>(json['title']),
+      body: serializer.fromJson<String>(json['body']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'ownerId': serializer.toJson<String>(ownerId),
+      'ownerType': serializer.toJson<String>(ownerType),
+      'kind': serializer.toJson<String>(kind),
+      'enabled': serializer.toJson<bool>(enabled),
+      'timeZone': serializer.toJson<String>(timeZone),
+      'instantUtc': serializer.toJson<DateTime?>(instantUtc),
+      'localTimeHour': serializer.toJson<int?>(localTimeHour),
+      'localTimeMinute': serializer.toJson<int?>(localTimeMinute),
+      'anchorLocalDate': serializer.toJson<DateTime?>(anchorLocalDate),
+      'byWeekday': serializer.toJson<int?>(byWeekday),
+      'updatedAtUtc': serializer.toJson<DateTime>(updatedAtUtc),
+      'title': serializer.toJson<String>(title),
+      'body': serializer.toJson<String>(body),
+    };
+  }
+
+  ReminderRow copyWith({
+    String? id,
+    String? ownerId,
+    String? ownerType,
+    String? kind,
+    bool? enabled,
+    String? timeZone,
+    Value<DateTime?> instantUtc = const Value.absent(),
+    Value<int?> localTimeHour = const Value.absent(),
+    Value<int?> localTimeMinute = const Value.absent(),
+    Value<DateTime?> anchorLocalDate = const Value.absent(),
+    Value<int?> byWeekday = const Value.absent(),
+    DateTime? updatedAtUtc,
+    String? title,
+    String? body,
+  }) => ReminderRow(
+    id: id ?? this.id,
+    ownerId: ownerId ?? this.ownerId,
+    ownerType: ownerType ?? this.ownerType,
+    kind: kind ?? this.kind,
+    enabled: enabled ?? this.enabled,
+    timeZone: timeZone ?? this.timeZone,
+    instantUtc: instantUtc.present ? instantUtc.value : this.instantUtc,
+    localTimeHour: localTimeHour.present
+        ? localTimeHour.value
+        : this.localTimeHour,
+    localTimeMinute: localTimeMinute.present
+        ? localTimeMinute.value
+        : this.localTimeMinute,
+    anchorLocalDate: anchorLocalDate.present
+        ? anchorLocalDate.value
+        : this.anchorLocalDate,
+    byWeekday: byWeekday.present ? byWeekday.value : this.byWeekday,
+    updatedAtUtc: updatedAtUtc ?? this.updatedAtUtc,
+    title: title ?? this.title,
+    body: body ?? this.body,
+  );
+  ReminderRow copyWithCompanion(ReminderRowsCompanion data) {
+    return ReminderRow(
+      id: data.id.present ? data.id.value : this.id,
+      ownerId: data.ownerId.present ? data.ownerId.value : this.ownerId,
+      ownerType: data.ownerType.present ? data.ownerType.value : this.ownerType,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      enabled: data.enabled.present ? data.enabled.value : this.enabled,
+      timeZone: data.timeZone.present ? data.timeZone.value : this.timeZone,
+      instantUtc: data.instantUtc.present
+          ? data.instantUtc.value
+          : this.instantUtc,
+      localTimeHour: data.localTimeHour.present
+          ? data.localTimeHour.value
+          : this.localTimeHour,
+      localTimeMinute: data.localTimeMinute.present
+          ? data.localTimeMinute.value
+          : this.localTimeMinute,
+      anchorLocalDate: data.anchorLocalDate.present
+          ? data.anchorLocalDate.value
+          : this.anchorLocalDate,
+      byWeekday: data.byWeekday.present ? data.byWeekday.value : this.byWeekday,
+      updatedAtUtc: data.updatedAtUtc.present
+          ? data.updatedAtUtc.value
+          : this.updatedAtUtc,
+      title: data.title.present ? data.title.value : this.title,
+      body: data.body.present ? data.body.value : this.body,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReminderRow(')
+          ..write('id: $id, ')
+          ..write('ownerId: $ownerId, ')
+          ..write('ownerType: $ownerType, ')
+          ..write('kind: $kind, ')
+          ..write('enabled: $enabled, ')
+          ..write('timeZone: $timeZone, ')
+          ..write('instantUtc: $instantUtc, ')
+          ..write('localTimeHour: $localTimeHour, ')
+          ..write('localTimeMinute: $localTimeMinute, ')
+          ..write('anchorLocalDate: $anchorLocalDate, ')
+          ..write('byWeekday: $byWeekday, ')
+          ..write('updatedAtUtc: $updatedAtUtc, ')
+          ..write('title: $title, ')
+          ..write('body: $body')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    ownerId,
+    ownerType,
+    kind,
+    enabled,
+    timeZone,
+    instantUtc,
+    localTimeHour,
+    localTimeMinute,
+    anchorLocalDate,
+    byWeekday,
+    updatedAtUtc,
+    title,
+    body,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReminderRow &&
+          other.id == this.id &&
+          other.ownerId == this.ownerId &&
+          other.ownerType == this.ownerType &&
+          other.kind == this.kind &&
+          other.enabled == this.enabled &&
+          other.timeZone == this.timeZone &&
+          other.instantUtc == this.instantUtc &&
+          other.localTimeHour == this.localTimeHour &&
+          other.localTimeMinute == this.localTimeMinute &&
+          other.anchorLocalDate == this.anchorLocalDate &&
+          other.byWeekday == this.byWeekday &&
+          other.updatedAtUtc == this.updatedAtUtc &&
+          other.title == this.title &&
+          other.body == this.body);
+}
+
+class ReminderRowsCompanion extends UpdateCompanion<ReminderRow> {
+  final Value<String> id;
+  final Value<String> ownerId;
+  final Value<String> ownerType;
+  final Value<String> kind;
+  final Value<bool> enabled;
+  final Value<String> timeZone;
+  final Value<DateTime?> instantUtc;
+  final Value<int?> localTimeHour;
+  final Value<int?> localTimeMinute;
+  final Value<DateTime?> anchorLocalDate;
+  final Value<int?> byWeekday;
+  final Value<DateTime> updatedAtUtc;
+  final Value<String> title;
+  final Value<String> body;
+  final Value<int> rowid;
+  const ReminderRowsCompanion({
+    this.id = const Value.absent(),
+    this.ownerId = const Value.absent(),
+    this.ownerType = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.enabled = const Value.absent(),
+    this.timeZone = const Value.absent(),
+    this.instantUtc = const Value.absent(),
+    this.localTimeHour = const Value.absent(),
+    this.localTimeMinute = const Value.absent(),
+    this.anchorLocalDate = const Value.absent(),
+    this.byWeekday = const Value.absent(),
+    this.updatedAtUtc = const Value.absent(),
+    this.title = const Value.absent(),
+    this.body = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ReminderRowsCompanion.insert({
+    required String id,
+    required String ownerId,
+    required String ownerType,
+    required String kind,
+    this.enabled = const Value.absent(),
+    this.timeZone = const Value.absent(),
+    this.instantUtc = const Value.absent(),
+    this.localTimeHour = const Value.absent(),
+    this.localTimeMinute = const Value.absent(),
+    this.anchorLocalDate = const Value.absent(),
+    this.byWeekday = const Value.absent(),
+    required DateTime updatedAtUtc,
+    this.title = const Value.absent(),
+    this.body = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       ownerId = Value(ownerId),
+       ownerType = Value(ownerType),
+       kind = Value(kind),
+       updatedAtUtc = Value(updatedAtUtc);
+  static Insertable<ReminderRow> custom({
+    Expression<String>? id,
+    Expression<String>? ownerId,
+    Expression<String>? ownerType,
+    Expression<String>? kind,
+    Expression<bool>? enabled,
+    Expression<String>? timeZone,
+    Expression<DateTime>? instantUtc,
+    Expression<int>? localTimeHour,
+    Expression<int>? localTimeMinute,
+    Expression<DateTime>? anchorLocalDate,
+    Expression<int>? byWeekday,
+    Expression<DateTime>? updatedAtUtc,
+    Expression<String>? title,
+    Expression<String>? body,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (ownerId != null) 'owner_id': ownerId,
+      if (ownerType != null) 'owner_type': ownerType,
+      if (kind != null) 'kind': kind,
+      if (enabled != null) 'enabled': enabled,
+      if (timeZone != null) 'time_zone': timeZone,
+      if (instantUtc != null) 'instant_utc': instantUtc,
+      if (localTimeHour != null) 'local_time_hour': localTimeHour,
+      if (localTimeMinute != null) 'local_time_minute': localTimeMinute,
+      if (anchorLocalDate != null) 'anchor_local_date': anchorLocalDate,
+      if (byWeekday != null) 'by_weekday': byWeekday,
+      if (updatedAtUtc != null) 'updated_at_utc': updatedAtUtc,
+      if (title != null) 'title': title,
+      if (body != null) 'body': body,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ReminderRowsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? ownerId,
+    Value<String>? ownerType,
+    Value<String>? kind,
+    Value<bool>? enabled,
+    Value<String>? timeZone,
+    Value<DateTime?>? instantUtc,
+    Value<int?>? localTimeHour,
+    Value<int?>? localTimeMinute,
+    Value<DateTime?>? anchorLocalDate,
+    Value<int?>? byWeekday,
+    Value<DateTime>? updatedAtUtc,
+    Value<String>? title,
+    Value<String>? body,
+    Value<int>? rowid,
+  }) {
+    return ReminderRowsCompanion(
+      id: id ?? this.id,
+      ownerId: ownerId ?? this.ownerId,
+      ownerType: ownerType ?? this.ownerType,
+      kind: kind ?? this.kind,
+      enabled: enabled ?? this.enabled,
+      timeZone: timeZone ?? this.timeZone,
+      instantUtc: instantUtc ?? this.instantUtc,
+      localTimeHour: localTimeHour ?? this.localTimeHour,
+      localTimeMinute: localTimeMinute ?? this.localTimeMinute,
+      anchorLocalDate: anchorLocalDate ?? this.anchorLocalDate,
+      byWeekday: byWeekday ?? this.byWeekday,
+      updatedAtUtc: updatedAtUtc ?? this.updatedAtUtc,
+      title: title ?? this.title,
+      body: body ?? this.body,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (ownerId.present) {
+      map['owner_id'] = Variable<String>(ownerId.value);
+    }
+    if (ownerType.present) {
+      map['owner_type'] = Variable<String>(ownerType.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (enabled.present) {
+      map['enabled'] = Variable<bool>(enabled.value);
+    }
+    if (timeZone.present) {
+      map['time_zone'] = Variable<String>(timeZone.value);
+    }
+    if (instantUtc.present) {
+      map['instant_utc'] = Variable<DateTime>(instantUtc.value);
+    }
+    if (localTimeHour.present) {
+      map['local_time_hour'] = Variable<int>(localTimeHour.value);
+    }
+    if (localTimeMinute.present) {
+      map['local_time_minute'] = Variable<int>(localTimeMinute.value);
+    }
+    if (anchorLocalDate.present) {
+      map['anchor_local_date'] = Variable<DateTime>(anchorLocalDate.value);
+    }
+    if (byWeekday.present) {
+      map['by_weekday'] = Variable<int>(byWeekday.value);
+    }
+    if (updatedAtUtc.present) {
+      map['updated_at_utc'] = Variable<DateTime>(updatedAtUtc.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (body.present) {
+      map['body'] = Variable<String>(body.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReminderRowsCompanion(')
+          ..write('id: $id, ')
+          ..write('ownerId: $ownerId, ')
+          ..write('ownerType: $ownerType, ')
+          ..write('kind: $kind, ')
+          ..write('enabled: $enabled, ')
+          ..write('timeZone: $timeZone, ')
+          ..write('instantUtc: $instantUtc, ')
+          ..write('localTimeHour: $localTimeHour, ')
+          ..write('localTimeMinute: $localTimeMinute, ')
+          ..write('anchorLocalDate: $anchorLocalDate, ')
+          ..write('byWeekday: $byWeekday, ')
+          ..write('updatedAtUtc: $updatedAtUtc, ')
+          ..write('title: $title, ')
+          ..write('body: $body, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2006,6 +2829,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ScheduledNotificationRowsTable(this);
   late final $DeletedRecordRowsTable deletedRecordRows =
       $DeletedRecordRowsTable(this);
+  late final $ReminderRowsTable reminderRows = $ReminderRowsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2015,6 +2839,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     noteRows,
     scheduledNotificationRows,
     deletedRecordRows,
+    reminderRows,
   ];
 }
 
@@ -3050,6 +3875,387 @@ typedef $$DeletedRecordRowsTableProcessedTableManager =
       DeletedRecordRow,
       PrefetchHooks Function()
     >;
+typedef $$ReminderRowsTableCreateCompanionBuilder =
+    ReminderRowsCompanion Function({
+      required String id,
+      required String ownerId,
+      required String ownerType,
+      required String kind,
+      Value<bool> enabled,
+      Value<String> timeZone,
+      Value<DateTime?> instantUtc,
+      Value<int?> localTimeHour,
+      Value<int?> localTimeMinute,
+      Value<DateTime?> anchorLocalDate,
+      Value<int?> byWeekday,
+      required DateTime updatedAtUtc,
+      Value<String> title,
+      Value<String> body,
+      Value<int> rowid,
+    });
+typedef $$ReminderRowsTableUpdateCompanionBuilder =
+    ReminderRowsCompanion Function({
+      Value<String> id,
+      Value<String> ownerId,
+      Value<String> ownerType,
+      Value<String> kind,
+      Value<bool> enabled,
+      Value<String> timeZone,
+      Value<DateTime?> instantUtc,
+      Value<int?> localTimeHour,
+      Value<int?> localTimeMinute,
+      Value<DateTime?> anchorLocalDate,
+      Value<int?> byWeekday,
+      Value<DateTime> updatedAtUtc,
+      Value<String> title,
+      Value<String> body,
+      Value<int> rowid,
+    });
+
+class $$ReminderRowsTableFilterComposer
+    extends Composer<_$AppDatabase, $ReminderRowsTable> {
+  $$ReminderRowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerId => $composableBuilder(
+    column: $table.ownerId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerType => $composableBuilder(
+    column: $table.ownerType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get timeZone => $composableBuilder(
+    column: $table.timeZone,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get instantUtc => $composableBuilder(
+    column: $table.instantUtc,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get localTimeHour => $composableBuilder(
+    column: $table.localTimeHour,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get localTimeMinute => $composableBuilder(
+    column: $table.localTimeMinute,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get anchorLocalDate => $composableBuilder(
+    column: $table.anchorLocalDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get byWeekday => $composableBuilder(
+    column: $table.byWeekday,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAtUtc => $composableBuilder(
+    column: $table.updatedAtUtc,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ReminderRowsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ReminderRowsTable> {
+  $$ReminderRowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ownerId => $composableBuilder(
+    column: $table.ownerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ownerType => $composableBuilder(
+    column: $table.ownerType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get timeZone => $composableBuilder(
+    column: $table.timeZone,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get instantUtc => $composableBuilder(
+    column: $table.instantUtc,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get localTimeHour => $composableBuilder(
+    column: $table.localTimeHour,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get localTimeMinute => $composableBuilder(
+    column: $table.localTimeMinute,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get anchorLocalDate => $composableBuilder(
+    column: $table.anchorLocalDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get byWeekday => $composableBuilder(
+    column: $table.byWeekday,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAtUtc => $composableBuilder(
+    column: $table.updatedAtUtc,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ReminderRowsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ReminderRowsTable> {
+  $$ReminderRowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get ownerId =>
+      $composableBuilder(column: $table.ownerId, builder: (column) => column);
+
+  GeneratedColumn<String> get ownerType =>
+      $composableBuilder(column: $table.ownerType, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<bool> get enabled =>
+      $composableBuilder(column: $table.enabled, builder: (column) => column);
+
+  GeneratedColumn<String> get timeZone =>
+      $composableBuilder(column: $table.timeZone, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get instantUtc => $composableBuilder(
+    column: $table.instantUtc,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get localTimeHour => $composableBuilder(
+    column: $table.localTimeHour,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get localTimeMinute => $composableBuilder(
+    column: $table.localTimeMinute,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get anchorLocalDate => $composableBuilder(
+    column: $table.anchorLocalDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get byWeekday =>
+      $composableBuilder(column: $table.byWeekday, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAtUtc => $composableBuilder(
+    column: $table.updatedAtUtc,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get body =>
+      $composableBuilder(column: $table.body, builder: (column) => column);
+}
+
+class $$ReminderRowsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ReminderRowsTable,
+          ReminderRow,
+          $$ReminderRowsTableFilterComposer,
+          $$ReminderRowsTableOrderingComposer,
+          $$ReminderRowsTableAnnotationComposer,
+          $$ReminderRowsTableCreateCompanionBuilder,
+          $$ReminderRowsTableUpdateCompanionBuilder,
+          (
+            ReminderRow,
+            BaseReferences<_$AppDatabase, $ReminderRowsTable, ReminderRow>,
+          ),
+          ReminderRow,
+          PrefetchHooks Function()
+        > {
+  $$ReminderRowsTableTableManager(_$AppDatabase db, $ReminderRowsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ReminderRowsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ReminderRowsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ReminderRowsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> ownerId = const Value.absent(),
+                Value<String> ownerType = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<bool> enabled = const Value.absent(),
+                Value<String> timeZone = const Value.absent(),
+                Value<DateTime?> instantUtc = const Value.absent(),
+                Value<int?> localTimeHour = const Value.absent(),
+                Value<int?> localTimeMinute = const Value.absent(),
+                Value<DateTime?> anchorLocalDate = const Value.absent(),
+                Value<int?> byWeekday = const Value.absent(),
+                Value<DateTime> updatedAtUtc = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> body = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReminderRowsCompanion(
+                id: id,
+                ownerId: ownerId,
+                ownerType: ownerType,
+                kind: kind,
+                enabled: enabled,
+                timeZone: timeZone,
+                instantUtc: instantUtc,
+                localTimeHour: localTimeHour,
+                localTimeMinute: localTimeMinute,
+                anchorLocalDate: anchorLocalDate,
+                byWeekday: byWeekday,
+                updatedAtUtc: updatedAtUtc,
+                title: title,
+                body: body,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String ownerId,
+                required String ownerType,
+                required String kind,
+                Value<bool> enabled = const Value.absent(),
+                Value<String> timeZone = const Value.absent(),
+                Value<DateTime?> instantUtc = const Value.absent(),
+                Value<int?> localTimeHour = const Value.absent(),
+                Value<int?> localTimeMinute = const Value.absent(),
+                Value<DateTime?> anchorLocalDate = const Value.absent(),
+                Value<int?> byWeekday = const Value.absent(),
+                required DateTime updatedAtUtc,
+                Value<String> title = const Value.absent(),
+                Value<String> body = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReminderRowsCompanion.insert(
+                id: id,
+                ownerId: ownerId,
+                ownerType: ownerType,
+                kind: kind,
+                enabled: enabled,
+                timeZone: timeZone,
+                instantUtc: instantUtc,
+                localTimeHour: localTimeHour,
+                localTimeMinute: localTimeMinute,
+                anchorLocalDate: anchorLocalDate,
+                byWeekday: byWeekday,
+                updatedAtUtc: updatedAtUtc,
+                title: title,
+                body: body,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ReminderRowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ReminderRowsTable,
+      ReminderRow,
+      $$ReminderRowsTableFilterComposer,
+      $$ReminderRowsTableOrderingComposer,
+      $$ReminderRowsTableAnnotationComposer,
+      $$ReminderRowsTableCreateCompanionBuilder,
+      $$ReminderRowsTableUpdateCompanionBuilder,
+      (
+        ReminderRow,
+        BaseReferences<_$AppDatabase, $ReminderRowsTable, ReminderRow>,
+      ),
+      ReminderRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3065,4 +4271,6 @@ class $AppDatabaseManager {
       );
   $$DeletedRecordRowsTableTableManager get deletedRecordRows =>
       $$DeletedRecordRowsTableTableManager(_db, _db.deletedRecordRows);
+  $$ReminderRowsTableTableManager get reminderRows =>
+      $$ReminderRowsTableTableManager(_db, _db.reminderRows);
 }

@@ -111,6 +111,45 @@ void syncTests() {
       }
     });
 
+    testWidgets('lembrete criado sem servidor sobrevive a um sync offline', (
+      tester,
+    ) async {
+      final harness = await pumpApp(tester);
+      addTearDown(harness.dispose);
+
+      // Boot lands on "Hoje". Create a standalone reminder with NO server
+      // configured — proves reminders work fully standalone.
+      final novaNotificacao = find.text('Nova notificação');
+      await tester.ensureVisible(novaNotificacao);
+      await tester.tap(novaNotificacao, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      // The notification editor dialog: first field is the title.
+      await tester.enterText(find.byType(TextField).first, 'Lembrete offline');
+      await tester.pumpAndSettle();
+      final salvar = find.widgetWithText(FilledButton, 'Salvar');
+      await tester.tap(salvar, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      // The reminder is scheduled locally and listed, no server involved.
+      expect(find.text('Lembrete offline'), findsWidgets);
+
+      // Run an offline sync (empty server URL → OfflineSyncAdapter).
+      await tester.tap(find.text('Sync').first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      await _tapSyncButton(
+        tester,
+        find.widgetWithText(FilledButton, 'Sincronizar'),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      // Back on Hoje, the reminder is still there after the offline sync.
+      await tester.tap(find.text('Hoje').first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Lembrete offline'), findsWidgets);
+    });
+
     testWidgets('Copiar TXT e Restaurar TXT estao presentes em Sync', (
       tester,
     ) async {

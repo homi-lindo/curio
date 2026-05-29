@@ -36,6 +36,18 @@ void main() {
           updatedAtUtc: now,
         ),
       ],
+      reminders: <ReminderIntent>[
+        ReminderIntent.daily(
+          id: 'rem-daily',
+          ownerId: 'note-custom',
+          ownerType: ReminderOwnerType.note,
+          localTime: const LocalClockTime(hour: 7, minute: 45),
+          timeZone: 'America/Sao_Paulo',
+          updatedAtUtc: now,
+          title: 'Tomar remédio',
+          body: 'dose da manhã',
+        ),
+      ],
       deletedRecords: <DeletedRecord>[
         DeletedRecord(
           recordType: SyncRecordType.task,
@@ -54,6 +66,13 @@ void main() {
     expect(loaded.tasks.single.sourceNoteId, 'note-custom');
     expect(loaded.notes.single.body, 'corpo');
     expect(loaded.deletedRecords.single.recordId, 'task-deleted');
+    final reminder = loaded.reminders.single;
+    expect(reminder.id, 'rem-daily');
+    expect(reminder.kind, ScheduleKind.daily);
+    expect(reminder.localTime?.hour, 7);
+    expect(reminder.localTime?.minute, 45);
+    expect(reminder.title, 'Tomar remédio');
+    expect(reminder.timeZone, 'America/Sao_Paulo');
     expect(await store.file.then((file) => file.exists()), isTrue);
   });
 

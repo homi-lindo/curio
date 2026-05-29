@@ -32,6 +32,8 @@ final class ReminderIntent {
     this.localTime,
     DateTime? anchorLocalDate,
     this.byWeekday,
+    this.title = '',
+    this.body = '',
   }) : anchorLocalDate = anchorLocalDate == null
            ? null
            : DateTime(
@@ -58,6 +60,8 @@ final class ReminderIntent {
     required DateTime updatedAtUtc,
     bool enabled = true,
     String timeZone = 'UTC',
+    String title = '',
+    String body = '',
   }) {
     return ReminderIntent(
       id: id,
@@ -68,6 +72,8 @@ final class ReminderIntent {
       timeZone: timeZone,
       instantUtc: instantUtc.toUtc(),
       updatedAtUtc: updatedAtUtc.toUtc(),
+      title: title,
+      body: body,
     );
   }
 
@@ -79,6 +85,8 @@ final class ReminderIntent {
     required String timeZone,
     required DateTime updatedAtUtc,
     bool enabled = true,
+    String title = '',
+    String body = '',
   }) {
     return ReminderIntent(
       id: id,
@@ -89,6 +97,8 @@ final class ReminderIntent {
       timeZone: timeZone,
       localTime: localTime,
       updatedAtUtc: updatedAtUtc.toUtc(),
+      title: title,
+      body: body,
     );
   }
 
@@ -102,6 +112,8 @@ final class ReminderIntent {
     required int byWeekday,
     required DateTime updatedAtUtc,
     bool enabled = true,
+    String title = '',
+    String body = '',
   }) {
     return ReminderIntent(
       id: id,
@@ -114,6 +126,8 @@ final class ReminderIntent {
       anchorLocalDate: anchorLocalDate,
       byWeekday: byWeekday,
       updatedAtUtc: updatedAtUtc.toUtc(),
+      title: title,
+      body: body,
     );
   }
 
@@ -128,6 +142,79 @@ final class ReminderIntent {
   final DateTime? anchorLocalDate;
   final int? byWeekday;
   final DateTime updatedAtUtc;
+  final String title;
+  final String body;
+
+  factory ReminderIntent.fromJson(Map<String, Object?> json) {
+    final localTimeJson = json['localTime'];
+    final localTime = localTimeJson is Map
+        ? LocalClockTime(
+            hour: (localTimeJson['hour'] as num).toInt(),
+            minute: (localTimeJson['minute'] as num).toInt(),
+          )
+        : null;
+    final anchor = json['anchorLocalDate'] as String?;
+    final instant = json['instantUtc'] as String?;
+    return ReminderIntent(
+      id: json['id'] as String,
+      ownerId: json['ownerId'] as String,
+      ownerType: ReminderOwnerType.values.byName(json['ownerType'] as String),
+      kind: ScheduleKind.values.byName(json['kind'] as String),
+      enabled: json['enabled'] as bool? ?? true,
+      timeZone: json['timeZone'] as String? ?? 'UTC',
+      updatedAtUtc: DateTime.parse(json['updatedAtUtc'] as String).toUtc(),
+      instantUtc: instant == null ? null : DateTime.parse(instant).toUtc(),
+      localTime: localTime,
+      anchorLocalDate: anchor == null ? null : DateTime.parse(anchor),
+      byWeekday: (json['byWeekday'] as num?)?.toInt(),
+      title: json['title'] as String? ?? '',
+      body: json['body'] as String? ?? '',
+    );
+  }
+
+  ReminderIntent copyWith({
+    bool? enabled,
+    String? timeZone,
+    DateTime? updatedAtUtc,
+    String? title,
+    String? body,
+  }) {
+    return ReminderIntent(
+      id: id,
+      ownerId: ownerId,
+      ownerType: ownerType,
+      kind: kind,
+      enabled: enabled ?? this.enabled,
+      timeZone: timeZone ?? this.timeZone,
+      instantUtc: instantUtc,
+      localTime: localTime,
+      anchorLocalDate: anchorLocalDate,
+      byWeekday: byWeekday,
+      updatedAtUtc: updatedAtUtc ?? this.updatedAtUtc,
+      title: title ?? this.title,
+      body: body ?? this.body,
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'id': id,
+      'ownerId': ownerId,
+      'ownerType': ownerType.name,
+      'kind': kind.name,
+      'enabled': enabled,
+      'timeZone': timeZone,
+      'updatedAtUtc': updatedAtUtc.toUtc().toIso8601String(),
+      'instantUtc': instantUtc?.toUtc().toIso8601String(),
+      'localTime': localTime == null
+          ? null
+          : <String, int>{'hour': localTime!.hour, 'minute': localTime!.minute},
+      'anchorLocalDate': anchorLocalDate?.toIso8601String(),
+      'byWeekday': byWeekday,
+      'title': title,
+      'body': body,
+    };
+  }
 }
 
 final class OccurrencePlan {

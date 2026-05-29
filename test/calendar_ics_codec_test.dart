@@ -22,6 +22,42 @@ void main() {
     expect(ics, contains('TRIGGER:PT0S'));
   });
 
+  test('reminderId is a stable identity used for import dedup', () {
+    CalendarIcsEvent event({
+      String uid = '',
+      String title = 'Reunião',
+      DateTime? startsAtUtc,
+    }) {
+      return CalendarIcsEvent(
+        uid: uid,
+        title: title,
+        description: '',
+        startsAtUtc: startsAtUtc ?? DateTime.utc(2026, 5, 22, 15),
+        allDay: false,
+        curioType: 'NOTIFICATION',
+      );
+    }
+
+    // Prefixed and stable across instances.
+    expect(event(uid: 'abc').reminderId, startsWith('ics-'));
+    expect(event(uid: 'abc').reminderId, event(uid: 'abc').reminderId);
+
+    // Distinct UIDs → distinct ids, even with identical title and time.
+    expect(event(uid: 'abc').reminderId, isNot(event(uid: 'xyz').reminderId));
+
+    // Without UID: same title + same instant collapse (genuinely the same
+    // event); same title + different instant stay distinct (the dedup fix —
+    // the old title+minute heuristic wrongly merged these).
+    expect(
+      event(startsAtUtc: DateTime.utc(2026, 5, 22, 15)).reminderId,
+      event(startsAtUtc: DateTime.utc(2026, 5, 22, 15)).reminderId,
+    );
+    expect(
+      event(startsAtUtc: DateTime.utc(2026, 5, 22, 15)).reminderId,
+      isNot(event(startsAtUtc: DateTime.utc(2026, 5, 23, 15)).reminderId),
+    );
+  });
+
   test('imports timed, all-day, alarm and recurring ICS events', () {
     const ics = '''
 BEGIN:VCALENDAR

@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
+import 'package:lume_core/sync/sync_pairing.dart';
+import 'package:lume_sync_server/cert_fingerprint.dart';
 import 'package:lume_sync_server/snapshot_store.dart';
 
 Future<void> main(List<String> args) async {
@@ -39,10 +41,70 @@ Future<void> main(List<String> args) async {
       'Warning: token auth over plain HTTP is only suitable for trusted LANs.',
     );
   }
+  _printPairing(config, scheme, server.port);
 
   await for (final request in server) {
     await _handleRequest(request, store, config);
   }
+}
+
+/// Prints the device pairing information at startup: the certificate
+/// fingerprint to pin and, when the reachable host is known, a ready-to-paste
+/// pairing code (origin + token + fingerprint).
+void _printPairing(_ServerConfig config, String scheme, int port) {
+  if (!config.tlsEnabled) {
+    stdout.writeln(
+      'Pairing: HTTPS desativado. O pinning de certificado exige TLS '
+      '(--tls-cert/--tls-key). Veja docs/self-hosted-sync.md.',
+    );
+    return;
+  }
+  final certFile = config.tlsCert;
+  if (certFile == null) {
+    return;
+  }
+
+  String? fingerprint;
+  try {
+    fingerprint = certificateSha256FromPem(certFile.readAsStringSync());
+  } on Object {
+    fingerprint = null;
+  }
+  if (fingerprint == null) {
+    stdout.writeln(
+      'Pairing: não foi possível calcular o fingerprint do certificado.',
+    );
+    return;
+  }
+  stdout.writeln('Certificate SHA-256: $fingerprint');
+
+  final token = config.token;
+  if (token == null) {
+    stdout.writeln(
+      'Pairing: defina LUME_SYNC_TOKEN para gerar o código de pareamento completo.',
+    );
+    return;
+  }
+
+  final bindHost = config.host.trim();
+  final reachableHost =
+      config.publicHost ??
+      (_isLoopbackHost(bindHost) || bindHost == '0.0.0.0' ? null : bindHost);
+  if (reachableHost == null) {
+    stdout.writeln(
+      'Pairing: no app, informe o servidor (https://SEU_HOST:$port) e cole este '
+      'fingerprint; ou defina LUME_SYNC_PUBLIC_HOST com o endereço acessível '
+      'para imprimir o código completo.',
+    );
+    return;
+  }
+
+  final code = SyncPairing(
+    serverUrl: '$scheme://$reachableHost:$port',
+    authToken: token,
+    certSha256: fingerprint,
+  ).encode();
+  stdout.writeln('Pairing code (cole no app): $code');
 }
 
 Future<void> _handleRequest(
@@ -92,10 +154,13 @@ Future<void> _handleRequest(
         ),
       );
       final current = await store.load();
-      final next = const SnapshotSyncMerger().merge(
+      final merged = const SnapshotSyncMerger().merge(
         local: current,
         remote: syncableServerSnapshot(incoming),
       );
+      // Bound long-term growth of the shared state with the same retention
+      // policy the clients use.
+      final next = compactSnapshot(merged, nowUtc: DateTime.now().toUtc());
       await store.save(next);
 
       await _writeJson(request.response, <String, Object?>{
@@ -201,6 +266,7 @@ final class _ServerConfig {
     required this.maxBodyBytes,
     required this.corsOrigin,
     required this.allowEmptyToken,
+    required this.publicHost,
   });
 
   final String host;
@@ -213,6 +279,10 @@ final class _ServerConfig {
   final int maxBodyBytes;
   final String? corsOrigin;
   final bool allowEmptyToken;
+
+  /// Externally reachable host used only to print the pairing code (the bind
+  /// [host] is often `0.0.0.0`). From `LUME_SYNC_PUBLIC_HOST`.
+  final String? publicHost;
 
   bool get tlsEnabled => tlsCert != null && tlsKey != null;
 
@@ -241,6 +311,7 @@ final class _ServerConfig {
           '.lume-sync/server-state.json',
     );
     var token = _nonEmpty(Platform.environment['LUME_SYNC_TOKEN']);
+    var publicHost = _nonEmpty(Platform.environment['LUME_SYNC_PUBLIC_HOST']);
     var tlsCert = _optionalFile(Platform.environment['LUME_SYNC_TLS_CERT']);
     var tlsKey = _optionalFile(Platform.environment['LUME_SYNC_TLS_KEY']);
     var tlsKeyPassword = _nonEmpty(
@@ -285,6 +356,8 @@ final class _ServerConfig {
           maxBodyBytes = _parseIntOption(arg, valueFor(arg));
         case '--cors-origin':
           corsOrigin = _nonEmpty(valueFor(arg));
+        case '--public-host':
+          publicHost = _nonEmpty(valueFor(arg));
         case '--allow-empty-token':
           allowEmptyToken = true;
         default:
@@ -339,6 +412,7 @@ final class _ServerConfig {
       maxBodyBytes: maxBodyBytes,
       corsOrigin: corsOrigin,
       allowEmptyToken: allowEmptyToken,
+      publicHost: publicHost,
     );
   }
 }
