@@ -62,6 +62,45 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\android\create-rele
 
 ## Microsoft Store
 
+### Store packaging (recommended — no certificate, no SmartScreen warning)
+
+Publishing through the Microsoft Store is the simplest secure path for Windows:
+the Store signs the package with a trusted certificate, so users get no
+"unknown publisher" / SmartScreen warning and you do not need to buy an EV/OV
+code-signing certificate. This is preferred over distributing a self-signed
+MSIX/EXE directly (which always triggers SmartScreen).
+
+Steps:
+
+1. In Partner Center, reserve the app name and open Product > Product identity.
+   Copy three values:
+   - Package/Identity/Name → `CURIO_STORE_IDENTITY_NAME`
+   - Package/Identity/Publisher (`CN=...`) → `CURIO_STORE_PUBLISHER`
+   - Publisher display name → `CURIO_STORE_PUBLISHER_DISPLAY_NAME`
+2. Build the Store package (unsigned — the Store signs it on ingestion):
+
+   ```powershell
+   $env:CURIO_STORE_IDENTITY_NAME = "1234Publisher.Curio"
+   $env:CURIO_STORE_PUBLISHER = "CN=ABCD1234-..."
+   $env:CURIO_STORE_PUBLISHER_DISPLAY_NAME = "Your Publisher Name"
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\windows\package-msix-store.ps1
+   ```
+
+3. Upload `build\windows\x64\runner\Release\lume.msix` in Partner Center.
+   Do not sign it locally; the Store re-signs it.
+
+This path does not use `tool\windows\package-msix.ps1` (that one is for a
+self-signed MSIX for local WACK testing / sideload, which is not for public
+distribution).
+
+### Full-trust desktop declaration
+
+Curió is a packaged desktop (Win32/Flutter) app, so the MSIX uses the
+`runFullTrust` restricted capability. This is allowed on the Store for desktop
+apps; during submission, justify it as: "Packaged desktop application built with
+Flutter; full trust is required to run the native desktop runtime. The app has
+no ads/analytics and only talks to the user-configured sync endpoint."
+
 ### Capabilities
 
 The MSIX declares `internetClient` and `privateNetworkClientServer` because the
