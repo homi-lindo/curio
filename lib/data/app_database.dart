@@ -220,11 +220,193 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// Persiste apenas o que mudou entre [previous] e [next]: upsert de linhas
+  /// novas/alteradas e delete das removidas, tudo em uma transação. Produz o
+  /// mesmo estado final que [replaceSnapshot] quando [previous] reflete o
+  /// banco atual — sem reescrever as tabelas inteiras a cada save.
+  Future<void> applySnapshotDiff(AppSnapshot previous, AppSnapshot next) async {
+    final taskDiff = _TableDiff.build(
+      previous.tasks,
+      next.tasks,
+      (task) => task.id,
+      (task) => task.toJson(),
+    );
+    final noteDiff = _TableDiff.build(
+      previous.notes,
+      next.notes,
+      (note) => note.id,
+      (note) => note.toJson(),
+    );
+    final notificationDiff = _TableDiff.build(
+      previous.scheduledNotifications,
+      next.scheduledNotifications,
+      (record) => record.id.toString(),
+      (record) => record.toJson(),
+    );
+    final reminderDiff = _TableDiff.build(
+      previous.reminders,
+      next.reminders,
+      (reminder) => reminder.id,
+      (reminder) => reminder.toJson(),
+    );
+    final deletedDiff = _TableDiff.build(
+      previous.deletedRecords,
+      next.deletedRecords,
+      (record) => record.key,
+      (record) => record.toJson(),
+    );
+
+    if (taskDiff.isEmpty &&
+        noteDiff.isEmpty &&
+        notificationDiff.isEmpty &&
+        reminderDiff.isEmpty &&
+        deletedDiff.isEmpty) {
+      return;
+    }
+
+    await transaction(() async {
+      if (taskDiff.removedKeys.isNotEmpty) {
+        await (delete(
+          taskRows,
+        )..where((row) => row.id.isIn(taskDiff.removedKeys))).go();
+      }
+      if (noteDiff.removedKeys.isNotEmpty) {
+        await (delete(
+          noteRows,
+        )..where((row) => row.id.isIn(noteDiff.removedKeys))).go();
+      }
+      if (notificationDiff.removedKeys.isNotEmpty) {
+        final ids = notificationDiff.removedKeys.map(int.parse).toList();
+        await (delete(
+          scheduledNotificationRows,
+        )..where((row) => row.id.isIn(ids))).go();
+      }
+      if (reminderDiff.removedKeys.isNotEmpty) {
+        await (delete(
+          reminderRows,
+        )..where((row) => row.id.isIn(reminderDiff.removedKeys))).go();
+      }
+      for (final removed in deletedDiff.removedItems) {
+        // PK composto (recordType, recordId); remoções de tombstone são raras
+        // (compaction), então o loop não pesa.
+        await (delete(deletedRecordRows)..where(
+              (row) =>
+                  row.recordType.equals(removed.recordType.name) &
+                  row.recordId.equals(removed.recordId),
+            ))
+            .go();
+      }
+
+      await batch((batch) {
+        batch.insertAllOnConflictUpdate(
+          taskRows,
+          taskDiff.upserts.map(_taskToCompanion).toList(),
+        );
+        batch.insertAllOnConflictUpdate(
+          noteRows,
+          noteDiff.upserts.map(_noteToCompanion).toList(),
+        );
+        batch.insertAllOnConflictUpdate(
+          scheduledNotificationRows,
+          notificationDiff.upserts.map(_notificationToCompanion).toList(),
+        );
+        batch.insertAllOnConflictUpdate(
+          reminderRows,
+          reminderDiff.upserts.map(_reminderToCompanion).toList(),
+        );
+        batch.insertAllOnConflictUpdate(
+          deletedRecordRows,
+          deletedDiff.upserts.map(_deletedRecordToCompanion).toList(),
+        );
+      });
+    });
+  }
+
   Future<int> _count(TableInfo<Table, Object?> table) async {
     final count = countAll();
     final query = selectOnly(table)..addColumns(<Expression<int>>[count]);
     return await query.map((row) => row.read(count) ?? 0).getSingle();
   }
+}
+
+/// Mudanças de uma tabela entre dois snapshots, calculadas por chave primária
+/// e igualdade profunda do JSON do item (os modelos de domínio não definem
+/// operator==).
+final class _TableDiff<T> {
+  const _TableDiff({
+    required this.upserts,
+    required this.removedKeys,
+    required this.removedItems,
+  });
+
+  factory _TableDiff.build(
+    List<T> previous,
+    List<T> next,
+    String Function(T) keyOf,
+    Map<String, Object?> Function(T) jsonOf,
+  ) {
+    final previousByKey = <String, T>{
+      for (final item in previous) keyOf(item): item,
+    };
+    final upserts = <T>[];
+    final nextKeys = <String>{};
+    for (final item in next) {
+      final key = keyOf(item);
+      nextKeys.add(key);
+      final existing = previousByKey[key];
+      if (existing == null ||
+          !_jsonEquals(jsonOf(existing), jsonOf(item))) {
+        upserts.add(item);
+      }
+    }
+    final removedItems = <T>[
+      for (final entry in previousByKey.entries)
+        if (!nextKeys.contains(entry.key)) entry.value,
+    ];
+    return _TableDiff(
+      upserts: upserts,
+      removedKeys: <String>[
+        for (final entry in previousByKey.entries)
+          if (!nextKeys.contains(entry.key)) entry.key,
+      ],
+      removedItems: removedItems,
+    );
+  }
+
+  final List<T> upserts;
+  final List<String> removedKeys;
+  final List<T> removedItems;
+
+  bool get isEmpty => upserts.isEmpty && removedKeys.isEmpty;
+}
+
+bool _jsonEquals(Object? a, Object? b) {
+  if (identical(a, b)) {
+    return true;
+  }
+  if (a is Map && b is Map) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (final key in a.keys) {
+      if (!b.containsKey(key) || !_jsonEquals(a[key], b[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (a is List && b is List) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var index = 0; index < a.length; index++) {
+      if (!_jsonEquals(a[index], b[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return a == b;
 }
 
 TaskItem _taskFromRow(TaskRow row) {

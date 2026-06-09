@@ -62,6 +62,12 @@ final class LocalStore {
     await database.replaceSnapshot(snapshot);
   }
 
+  /// Persiste apenas as diferenças entre [previous] e [next]. Mesmo resultado
+  /// de [save] quando [previous] espelha o banco atual.
+  Future<void> applyDiff(AppSnapshot previous, AppSnapshot next) async {
+    await database.applySnapshotDiff(previous, next);
+  }
+
   Future<void> close() async {
     await database.close();
   }

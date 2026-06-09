@@ -50,6 +50,12 @@ final class _CountingDatabase extends AppDatabase {
     saveCount++;
     return super.replaceSnapshot(snapshot);
   }
+
+  @override
+  Future<void> applySnapshotDiff(AppSnapshot previous, AppSnapshot next) {
+    saveCount++;
+    return super.applySnapshotDiff(previous, next);
+  }
 }
 
 final class _Harness {

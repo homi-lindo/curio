@@ -157,7 +157,10 @@ final class _CurioAppState extends State<CurioApp>
     _noteController = TextEditingController();
     _syncServerController = TextEditingController();
     _syncTokenController = TextEditingController();
-    _snapshotWrites = SnapshotWriteQueue(saveSnapshot: widget.store.save);
+    _snapshotWrites = SnapshotWriteQueue(
+      saveSnapshot: widget.store.save,
+      applyDiff: widget.store.applyDiff,
+    );
     _syncSidecar = LocalSyncSidecar(
       loadSnapshot: () async => _snapshot ?? await widget.store.load(),
       saveSnapshot: (snapshot) async {
@@ -199,6 +202,9 @@ final class _CurioAppState extends State<CurioApp>
     final alarmSettings = await widget.alarmSettings.load();
     final noteHistory = await widget.noteHistory.load();
     final loaded = await widget.store.load();
+    // O snapshot carregado espelha o banco: a partir daqui as escritas podem
+    // ir por diff em vez de replace completo.
+    _snapshotWrites.prime(loaded);
     final nowUtc = DateTime.now().toUtc();
     // Backfill syncable reminders for notifications scheduled before reminders
     // were synced (e.g. data from an older app version), so the reconcile below
