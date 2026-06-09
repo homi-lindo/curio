@@ -199,6 +199,13 @@ mixin _SyncActions on State<CurioApp> {
         return;
       }
 
+      // Relógio quebrado neste aparelho dominaria o LWW dos outros; melhor
+      // recusar aqui, com mensagem acionável, do que contaminar o servidor.
+      const SnapshotTimestampGuard().check(
+        snapshot,
+        nowUtc: DateTime.now().toUtc(),
+      );
+
       final serverUrl = _syncSettingsValidator.normalizeServerUrl(
         _syncServerController.text,
       );

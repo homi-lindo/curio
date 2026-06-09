@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
+import 'package:lume_core/sync/snapshot_timestamp_guard.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 import 'package:lume_core/sync/sync_pairing.dart';
 import 'package:path_provider/path_provider.dart';

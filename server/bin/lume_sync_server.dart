@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/sync/serial_task_queue.dart';
+import 'package:lume_core/sync/snapshot_revision.dart';
+import 'package:lume_core/sync/snapshot_timestamp_guard.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 import 'package:lume_core/sync/sync_pairing.dart';
 import 'package:lume_sync_server/cert_fingerprint.dart';
@@ -147,8 +149,12 @@ Future<void> _handleRequest(
       if (!await _authorize(request, config)) {
         return;
       }
+      final current = await store.load();
+      final revision = snapshotRevision(current);
+      request.response.headers.set(HttpHeaders.etagHeader, '"$revision"');
       await _writeJson(request.response, <String, Object?>{
-        'snapshot': (await store.load()).toJson(),
+        'snapshot': current.toJson(),
+        'revision': revision,
       });
       return;
     }
@@ -167,6 +173,23 @@ Future<void> _handleRequest(
           payload['snapshot']! as Map<dynamic, dynamic>,
         ),
       );
+      // Relógio quebrado num cliente dominaria o LWW de todos os outros;
+      // o snapshot é recusado antes de tocar o estado.
+      final clockIssues = const SnapshotTimestampGuard().findFutureTimestamps(
+        incoming,
+        nowUtc: DateTime.now().toUtc(),
+      );
+      if (clockIssues.isNotEmpty) {
+        request.response.statusCode = HttpStatus.badRequest;
+        await _writeJson(request.response, <String, Object?>{
+          'error':
+              'clock skew detected: ${clockIssues.length} record(s) with '
+              'timestamps in the future. Check the device clock.',
+          'issues': clockIssues.take(5).toList(),
+          'serverTimeUtc': DateTime.now().toUtc().toIso8601String(),
+        });
+        return;
+      }
       // Somente a mutação do estado entra no lock: a leitura do corpo (acima)
       // e a escrita da resposta (abaixo) podem rodar em paralelo com outras
       // requisições.
@@ -186,9 +209,12 @@ Future<void> _handleRequest(
         return compacted;
       });
 
+      final revision = snapshotRevision(next);
+      request.response.headers.set(HttpHeaders.etagHeader, '"$revision"');
       await _writeJson(request.response, <String, Object?>{
         'deviceId': deviceId,
         'snapshot': syncableServerSnapshot(next).toJson(),
+        'revision': revision,
         'serverTimeUtc': DateTime.now().toUtc().toIso8601String(),
       });
       return;

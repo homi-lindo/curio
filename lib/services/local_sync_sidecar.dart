@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/sync/serial_task_queue.dart';
+import 'package:lume_core/sync/snapshot_revision.dart';
+import 'package:lume_core/sync/snapshot_timestamp_guard.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 
 typedef SnapshotLoader = Future<AppSnapshot> Function();
@@ -102,8 +104,12 @@ final class LocalSyncSidecar {
       }
 
       if (request.method == 'GET' && request.uri.path == '/snapshot') {
+        final current = _syncable(await loadSnapshot());
+        final revision = snapshotRevision(current);
+        request.response.headers.set(HttpHeaders.etagHeader, '"$revision"');
         await _writeJson(request.response, <String, Object?>{
-          'snapshot': _syncable(await loadSnapshot()).toJson(),
+          'snapshot': current.toJson(),
+          'revision': revision,
         });
         return;
       }
@@ -115,6 +121,18 @@ final class LocalSyncSidecar {
             payload['snapshot']! as Map<dynamic, dynamic>,
           ),
         );
+        final clockIssues = const SnapshotTimestampGuard()
+            .findFutureTimestamps(incoming, nowUtc: DateTime.now().toUtc());
+        if (clockIssues.isNotEmpty) {
+          request.response.statusCode = HttpStatus.badRequest;
+          await _writeJson(request.response, <String, Object?>{
+            'error':
+                'relógio do aparelho remoto parece errado: '
+                '${clockIssues.length} registro(s) com data no futuro.',
+            'issues': clockIssues.take(5).toList(),
+          });
+          return;
+        }
         final next = await _stateLock.run(() async {
           final current = await loadSnapshot();
           final merged = const SnapshotSyncMerger().merge(
@@ -124,8 +142,11 @@ final class LocalSyncSidecar {
           await saveSnapshot(merged);
           return merged;
         });
+        final revision = snapshotRevision(next);
+        request.response.headers.set(HttpHeaders.etagHeader, '"$revision"');
         await _writeJson(request.response, <String, Object?>{
           'snapshot': _syncable(next).toJson(),
+          'revision': revision,
           'serverTimeUtc': DateTime.now().toUtc().toIso8601String(),
         });
         return;

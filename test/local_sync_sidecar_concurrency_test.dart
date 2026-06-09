@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lume/services/local_sync_sidecar.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
+import 'package:lume_core/sync/snapshot_revision.dart';
 
 const _token = 'token-de-teste-com-16+';
 
@@ -139,5 +140,97 @@ void main() {
 
     await pendingSync;
     expect(state.notes.map((note) => note.id), contains('nota-lenta'));
+  });
+
+  test('snapshot com relógio quebrado é recusado com 400', () async {
+    var state = AppSnapshot(
+      tasks: const [],
+      notes: const [],
+      scheduledNotifications: const [],
+      deletedRecords: const [],
+    );
+    final sidecar = LocalSyncSidecar(
+      loadSnapshot: () async => state,
+      saveSnapshot: (snapshot) async => state = snapshot,
+    );
+    final sidecarState = await sidecar.start(token: _token, host: '127.0.0.1');
+    addTearDown(sidecar.stop);
+
+    final brokenClock = _snapshotWithNote(
+      'nota-do-futuro',
+      DateTime.now().toUtc().add(const Duration(days: 30)),
+    );
+
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(
+        Uri.parse('http://127.0.0.1:${sidecarState.port}/sync'),
+      );
+      request.headers.set('x-lume-sync-token', _token);
+      request.headers.contentType = ContentType.json;
+      request.write(
+        jsonEncode(<String, Object?>{
+          'deviceId': 'teste',
+          'snapshot': brokenClock.toJson(),
+        }),
+      );
+      final response = await request.close();
+      final body = await utf8.decoder.bind(response).join();
+      expect(response.statusCode, HttpStatus.badRequest);
+      expect(body, contains('relógio'));
+    } finally {
+      client.close(force: true);
+    }
+
+    expect(
+      state.notes,
+      isEmpty,
+      reason: 'o snapshot com clock skew não pode contaminar o estado',
+    );
+  });
+
+  test('respostas de /sync e /snapshot expõem revision estável', () async {
+    var state = AppSnapshot(
+      tasks: const [],
+      notes: const [],
+      scheduledNotifications: const [],
+      deletedRecords: const [],
+    );
+    final sidecar = LocalSyncSidecar(
+      loadSnapshot: () async => state,
+      saveSnapshot: (snapshot) async => state = snapshot,
+    );
+    final sidecarState = await sidecar.start(token: _token, host: '127.0.0.1');
+    addTearDown(sidecar.stop);
+
+    final result = await _postSync(
+      sidecarState.port,
+      _snapshotWithNote('nota-rev', DateTime.now().toUtc()),
+    );
+
+    final revision = result['revision'];
+    expect(revision, isA<String>());
+    expect(revision, hasLength(64));
+    expect(
+      revision,
+      snapshotRevision(state),
+      reason: 'a revision da resposta deve refletir o estado salvo',
+    );
+
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(
+        Uri.parse('http://127.0.0.1:${sidecarState.port}/snapshot'),
+      );
+      request.headers.set('x-lume-sync-token', _token);
+      final response = await request.close();
+      final etag = response.headers.value(HttpHeaders.etagHeader);
+      final body = await utf8.decoder.bind(response).join();
+      final payload = Map<String, Object?>.from(jsonDecode(body) as Map);
+      expect(etag, '"$revision"');
+      expect(payload['revision'], revision);
+    } finally {
+      client.close(force: true);
+    }
   });
 }

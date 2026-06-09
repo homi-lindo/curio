@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:lume_core/sync/snapshot_timestamp_guard.dart';
+
 import 'alarm_settings_store.dart';
 import 'calendar_ics_codec.dart';
 import 'local_sync_sidecar.dart';
@@ -20,6 +22,9 @@ final class ActionErrorDescriber {
       return 'tempo limite excedido';
     }
     if (error is LocalSyncSidecarException) {
+      return error.message;
+    }
+    if (error is ClockSkewDetectedException) {
       return error.message;
     }
     if (error is AlarmSettingsException) {
