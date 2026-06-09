@@ -31,8 +31,8 @@ import 'services/manual_backup_codec.dart';
 import 'services/note_edit_history_store.dart';
 import 'services/notification_service.dart';
 import 'services/notification_timezone_audit.dart';
-import 'services/snapshot_write_queue.dart';
 import 'services/sync_settings_store.dart';
+import 'state/app_state_controller.dart';
 import 'services/sync_settings_validator.dart';
 import 'services/windows_attention_service.dart';
 import 'sync/http_sync_adapter.dart';
@@ -111,7 +111,7 @@ final class _CurioAppState extends State<CurioApp>
   late final TextEditingController _syncTokenController;
   @override
   late final LocalSyncSidecar _syncSidecar;
-  late final SnapshotWriteQueue _snapshotWrites;
+  late final AppStateController _appState;
   final AsyncActionGate _actionGate = AsyncActionGate();
   @override
   final ActionErrorDescriber _errorDescriber = const ActionErrorDescriber();
@@ -141,8 +141,13 @@ final class _CurioAppState extends State<CurioApp>
   AlarmSettings _alarmSettings = const AlarmSettings();
   LocalSyncSidecarState? _syncSidecarState;
   SyncResult? _lastSyncResult;
+
+  /// O snapshot vive no [AppStateController]; o par getter/setter mantém o
+  /// contrato `_snapshot` que os mixins de ação declaram.
   @override
-  AppSnapshot? _snapshot;
+  AppSnapshot? get _snapshot => _appState.snapshot;
+  set _snapshot(AppSnapshot? value) => _appState.publish(value);
+
   String? _selectedNoteId;
   ScheduledNotificationRecord? _activeAlarmRecord;
   List<NoteEditRevision> _noteHistory = const <NoteEditRevision>[];
@@ -154,7 +159,7 @@ final class _CurioAppState extends State<CurioApp>
       const NotificationPermissionState();
   bool _notificationComposerOpen = false;
   int _pendingCount = 0;
-  final List<String> _activity = <String>[];
+  List<String> get _activity => _appState.activity;
   String? _activityLogPath;
 
   @override
@@ -163,10 +168,13 @@ final class _CurioAppState extends State<CurioApp>
     _noteController = TextEditingController();
     _syncServerController = TextEditingController();
     _syncTokenController = TextEditingController();
-    _snapshotWrites = SnapshotWriteQueue(
-      saveSnapshot: widget.store.save,
-      applyDiff: widget.store.applyDiff,
+    _appState = AppStateController(
+      store: widget.store,
+      activityLog: widget.activityLog,
     );
+    // As views ainda recebem o estado por props: qualquer mudança publicada
+    // no controller vira um rebuild aqui até a migração view a view terminar.
+    _appState.addListener(() => _applyState(() {}));
     _syncSidecar = LocalSyncSidecar(
       loadSnapshot: () async => _snapshot ?? await widget.store.load(),
       saveSnapshot: (snapshot) async {
@@ -198,6 +206,7 @@ final class _CurioAppState extends State<CurioApp>
     _localAlarmTimers.clear();
     unawaited(widget.alarmPlayback.stop());
     unawaited(_syncSidecar.stop());
+    _appState.dispose();
     super.dispose();
   }
 
@@ -210,7 +219,7 @@ final class _CurioAppState extends State<CurioApp>
     final loaded = await widget.store.load();
     // O snapshot carregado espelha o banco: a partir daqui as escritas podem
     // ir por diff em vez de replace completo.
-    _snapshotWrites.prime(loaded);
+    _appState.prime(loaded);
     final nowUtc = DateTime.now().toUtc();
     // Backfill syncable reminders for notifications scheduled before reminders
     // were synced (e.g. data from an older app version), so the reconcile below
@@ -965,8 +974,9 @@ final class _CurioAppState extends State<CurioApp>
     );
     // O texto digitado entra em `_snapshot` imediatamente (sync e demais ações
     // leem daqui), mas a persistência é adiada: sem o debounce cada tecla
-    // reescreveria o banco inteiro via replaceSnapshot.
-    _snapshot = next;
+    // reescreveria o banco inteiro via replaceSnapshot. Publicação silenciosa:
+    // rebuild por tecla seria desperdício.
+    _appState.publishSilently(next);
     _noteAutosaveDirty = true;
     _noteAutosaveDebounce?.cancel();
     _noteAutosaveDebounce = Timer(_noteAutosaveDelay, _flushNoteAutosave);
@@ -1216,15 +1226,11 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   Future<void> _saveSnapshot(AppSnapshot snapshot) async {
-    // O estado em memória muda de forma síncrona (antes de qualquer await):
-    // assim quem leu `_snapshot` no mesmo microtask nunca observa rollback
-    // enquanto a escrita em disco está em voo. Quando o snapshot já é o
-    // atual (ex.: flush do autosave), não há rebuild a fazer.
+    // Os timers de alarme são domínio do widget (presos ao ciclo de vida do
+    // State); o resto — publicar em memória e enfileirar a escrita — é do
+    // controller.
     _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
-    if (!identical(_snapshot, snapshot)) {
-      _applyState(() => _snapshot = snapshot);
-    }
-    await _snapshotWrites.save(snapshot);
+    await _appState.save(snapshot);
   }
 
   @override
@@ -1269,23 +1275,7 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   void _log(String message) {
-    // Persistência best-effort para diagnóstico pós-fechamento; o buffer em
-    // memória continua sendo a fonte da UI.
-    unawaited(widget.activityLog.append(message));
-    if (!mounted) {
-      _activity.insert(0, message);
-      if (_activity.length > 50) {
-        _activity.removeLast();
-      }
-      return;
-    }
-
-    setState(() {
-      _activity.insert(0, message);
-      if (_activity.length > 50) {
-        _activity.removeLast();
-      }
-    });
+    _appState.log(message);
   }
 
   @override
