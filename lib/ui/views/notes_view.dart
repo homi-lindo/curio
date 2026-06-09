@@ -4,6 +4,7 @@ import 'package:lume_core/domain/reminder.dart';
 
 import '../../services/note_edit_history_store.dart';
 import '../markdown_editor.dart';
+import '../markdown_preview.dart';
 import '../notification_editor.dart';
 import '../task_view_helpers.dart';
 import '../widgets/notification_record_tile.dart';
@@ -164,35 +165,11 @@ final class NotesView extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 14),
-                MarkdownToolbar(
+                _NoteEditorArea(
                   enabled: selected != null,
-                  onAction: (action) => applyMarkdownFormat(
-                    controller: controller,
-                    onChanged: onBodyChanged,
-                    action: action,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                MarkdownShortcuts(
-                  enabled: selected != null,
+                  wide: wide,
                   controller: controller,
-                  onChanged: onBodyChanged,
-                  child: TextField(
-                    controller: controller,
-                    enabled: selected != null,
-                    onChanged: onBodyChanged,
-                    minLines: wide ? 22 : 14,
-                    maxLines: wide ? 36 : 28,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    style: const TextStyle(fontSize: 15, height: 1.45),
-                    decoration: InputDecoration(
-                      hintText: selected == null
-                          ? 'Escolha um dia no calendário para criar a nota.'
-                          : 'Escreva em Markdown.',
-                      alignLabelWithHint: true,
-                    ),
-                  ),
+                  onBodyChanged: onBodyChanged,
                 ),
                 const SizedBox(height: 18),
                 _NotificationList(
@@ -212,6 +189,124 @@ final class NotesView extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Editor Markdown com visualização opcional: toolbar + toggle de preview,
+/// lado a lado quando há largura, alternado quando não há. O estado do toggle
+/// é local — não interessa ao resto do app.
+final class _NoteEditorArea extends StatefulWidget {
+  const _NoteEditorArea({
+    required this.enabled,
+    required this.wide,
+    required this.controller,
+    required this.onBodyChanged,
+  });
+
+  final bool enabled;
+  final bool wide;
+  final TextEditingController controller;
+  final ValueChanged<String> onBodyChanged;
+
+  @override
+  State<_NoteEditorArea> createState() => _NoteEditorAreaState();
+}
+
+final class _NoteEditorAreaState extends State<_NoteEditorArea> {
+  bool _showPreview = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final editorField = MarkdownShortcuts(
+      enabled: widget.enabled,
+      controller: widget.controller,
+      onChanged: widget.onBodyChanged,
+      child: TextField(
+        controller: widget.controller,
+        enabled: widget.enabled,
+        onChanged: widget.onBodyChanged,
+        minLines: widget.wide ? 22 : 14,
+        maxLines: widget.wide ? 36 : 28,
+        keyboardType: TextInputType.multiline,
+        textInputAction: TextInputAction.newline,
+        style: const TextStyle(fontSize: 15, height: 1.45),
+        decoration: InputDecoration(
+          hintText: widget.enabled
+              ? 'Escreva em Markdown.'
+              : 'Escolha um dia no calendário para criar a nota.',
+          alignLabelWithHint: true,
+        ),
+      ),
+    );
+
+    final previewPane = Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 220, maxHeight: 560),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: SingleChildScrollView(
+        // Reconstrói a cada tecla via controller; o parse do package:markdown
+        // é barato na escala de uma nota.
+        child: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: widget.controller,
+          builder: (context, value, _) => MarkdownPreview(data: value.text),
+        ),
+      ),
+    );
+
+    final showSideBySide = _showPreview && widget.wide;
+    final showPreviewOnly = _showPreview && !widget.wide;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Expanded(
+              child: MarkdownToolbar(
+                enabled: widget.enabled && !showPreviewOnly,
+                onAction: (action) => applyMarkdownFormat(
+                  controller: widget.controller,
+                  onChanged: widget.onBodyChanged,
+                  action: action,
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: widget.enabled
+                  ? () => setState(() => _showPreview = !_showPreview)
+                  : null,
+              isSelected: _showPreview,
+              icon: const Icon(Icons.visibility_outlined),
+              selectedIcon: const Icon(Icons.edit_note_outlined),
+              tooltip: _showPreview
+                  ? (widget.wide
+                        ? 'Ocultar visualização'
+                        : 'Voltar para a edição')
+                  : 'Visualizar Markdown',
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (showSideBySide)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(child: editorField),
+              const SizedBox(width: 14),
+              Expanded(child: previewPane),
+            ],
+          )
+        else if (showPreviewOnly)
+          previewPane
+        else
+          editorField,
+      ],
     );
   }
 }
