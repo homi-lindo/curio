@@ -63,6 +63,7 @@ final class CalendarIcsCodec {
   CalendarIcsImport decode(String input) {
     final lines = _unfoldLines(input);
     final events = <CalendarIcsEvent>[];
+    final warnings = <String>[];
     var inEvent = false;
     var properties = <_IcsProperty>[];
 
@@ -75,7 +76,7 @@ final class CalendarIcsCodec {
       }
       if (trimmed.toUpperCase() == 'END:VEVENT') {
         inEvent = false;
-        final event = _eventFromProperties(properties);
+        final event = _eventFromProperties(properties, warnings);
         if (event != null) {
           events.add(event);
         }
@@ -92,7 +93,10 @@ final class CalendarIcsCodec {
     if (events.isEmpty) {
       throw const CalendarIcsException('Nenhum evento encontrado no .ics.');
     }
-    return CalendarIcsImport(events: events);
+    return CalendarIcsImport(
+      events: events,
+      warnings: _dedupedWarnings(warnings),
+    );
   }
 
   void _writeEvent(
@@ -155,9 +159,17 @@ final class CalendarIcsCodec {
 }
 
 final class CalendarIcsImport {
-  const CalendarIcsImport({required this.events});
+  const CalendarIcsImport({
+    required this.events,
+    this.warnings = const <String>[],
+  });
 
   final List<CalendarIcsEvent> events;
+
+  /// Degradações silenciosas viram avisos explícitos: recorrência que o Curió
+  /// não interpreta, fuso desconhecido caindo para o fuso local etc. O import
+  /// continua, mas o usuário fica sabendo o que foi perdido.
+  final List<String> warnings;
 }
 
 final class CalendarIcsEvent {
@@ -324,7 +336,10 @@ _IcsProperty? _parseProperty(String line) {
   return _IcsProperty(name: name, parameters: parameters, value: value);
 }
 
-CalendarIcsEvent? _eventFromProperties(List<_IcsProperty> properties) {
+CalendarIcsEvent? _eventFromProperties(
+  List<_IcsProperty> properties,
+  List<String> warnings,
+) {
   String? value(String name) => properties
       .where((property) => property.name == name)
       .map((property) => property.value)
@@ -338,7 +353,9 @@ CalendarIcsEvent? _eventFromProperties(List<_IcsProperty> properties) {
   }
 
   final allDay = dtStart.parameters.toUpperCase().contains('VALUE=DATE');
-  final startsAt = allDay ? _parseDate(dtStart.value) : _parseDateTime(dtStart);
+  final startsAt = allDay
+      ? _parseDate(dtStart.value)
+      : _parseDateTime(dtStart, warnings);
   final dtEnd = properties
       .where((property) => property.name == 'DTEND')
       .firstOrNull;
@@ -352,7 +369,7 @@ CalendarIcsEvent? _eventFromProperties(List<_IcsProperty> properties) {
             : startsAt.add(duration)
       : dtEnd.parameters.toUpperCase().contains('VALUE=DATE')
       ? _parseDate(dtEnd.value)
-      : _parseDateTime(dtEnd);
+      : _parseDateTime(dtEnd, warnings);
   final title = _unescapeText(value('SUMMARY') ?? 'Evento importado').trim();
   final timeZoneId =
       _parameterValue(dtStart.parameters, 'TZID') ??
@@ -367,7 +384,7 @@ CalendarIcsEvent? _eventFromProperties(List<_IcsProperty> properties) {
     trigger: triggerProperty,
   );
 
-  return CalendarIcsEvent(
+  final event = CalendarIcsEvent(
     uid: _unescapeText(value('UID') ?? title),
     title: title.isEmpty ? 'Evento importado' : title,
     description: _unescapeText(value('DESCRIPTION') ?? ''),
@@ -379,6 +396,32 @@ CalendarIcsEvent? _eventFromProperties(List<_IcsProperty> properties) {
     recurrenceRule: recurrenceRule,
     alarmTrigger: alarmTrigger,
   );
+  if (event.recurrenceRule.isNotEmpty && event.supportedRecurrence == null) {
+    warnings.add(
+      '"${event.title}": recorrência "${event.recurrenceRule}" não é '
+      'suportada — evento importado sem repetição (o Curió interpreta '
+      'apenas diária e semanal de um dia, sem COUNT/UNTIL/INTERVAL).',
+    );
+  }
+  return event;
+}
+
+/// Mantém os avisos legíveis: remove repetições e limita o total para um
+/// arquivo grande não virar uma parede de texto.
+List<String> _dedupedWarnings(List<String> warnings) {
+  final seen = <String>{};
+  final deduped = <String>[
+    for (final warning in warnings)
+      if (seen.add(warning)) warning,
+  ];
+  const cap = 12;
+  if (deduped.length <= cap) {
+    return List.unmodifiable(deduped);
+  }
+  return List.unmodifiable(<String>[
+    ...deduped.take(cap),
+    '+${deduped.length - cap} aviso(s) adicionais omitidos.',
+  ]);
 }
 
 DateTime _parseDate(String value) {
@@ -393,7 +436,7 @@ DateTime _parseDate(String value) {
   );
 }
 
-DateTime _parseDateTime(_IcsProperty property) {
+DateTime _parseDateTime(_IcsProperty property, List<String> warnings) {
   final compact = property.value.trim();
   if (compact.length < 15) {
     throw const CalendarIcsException('Data/hora inválida no .ics.');
@@ -422,6 +465,11 @@ DateTime _parseDateTime(_IcsProperty property) {
     if (resolved != null) {
       return resolved;
     }
+    warnings.add(
+      'Fuso horário "${timeZoneId.trim()}" não reconhecido — horários desses '
+      'eventos foram interpretados no fuso local do aparelho e podem ficar '
+      'deslocados.',
+    );
   }
 
   return DateTime(year, month, day, hour, minute, second).toUtc();
