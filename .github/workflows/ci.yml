@@ -1,0 +1,40 @@
+# CI mínimo: formatação, análise estática e testes de unidade a cada push.
+# Os testes de integração (integration_test/) precisam de um dispositivo e
+# ficam de fora; o gate completo de release continua sendo
+# tool/verify-release-readiness.ps1 rodado localmente.
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # Mesma versão do SDK local em .tools/flutter (Dart 3.12).
+          flutter-version: 3.44.0
+          cache: true
+
+      - name: Dependências
+        run: flutter pub get
+
+      - name: Formatação
+        run: dart format --set-exit-if-changed lib test integration_test packages server
+
+      - name: Análise estática
+        run: flutter analyze --no-pub
+
+      - name: Testes
+        run: flutter test --no-pub --reporter expanded
