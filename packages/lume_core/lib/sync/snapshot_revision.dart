@@ -11,9 +11,7 @@ import '../domain/app_snapshot.dart';
 /// (compare-and-swap) futuro sem quebrar clientes atuais.
 String snapshotRevision(AppSnapshot snapshot) {
   final canonical = jsonEncode(
-    snapshot
-        .copyWith(scheduledNotifications: const [])
-        .toJson(),
+    snapshot.copyWith(scheduledNotifications: const []).toJson(),
   );
   return sha256.convert(utf8.encode(canonical)).toString();
 }

@@ -197,60 +197,63 @@ void main() {
   );
 
   for (var fromVersion = 1; fromVersion <= 5; fromVersion++) {
-    test('migração v$fromVersion → v6 preserva dados e aceita escrita', () async {
-      final temp = await Directory.systemTemp.createTemp(
-        'lume_migration_v${fromVersion}_',
-      );
-      addTearDown(() async {
-        await temp.delete(recursive: true);
-      });
-      final file = File('${temp.path}${Platform.pathSeparator}lume.sqlite');
+    test(
+      'migração v$fromVersion → v6 preserva dados e aceita escrita',
+      () async {
+        final temp = await Directory.systemTemp.createTemp(
+          'lume_migration_v${fromVersion}_',
+        );
+        addTearDown(() async {
+          await temp.delete(recursive: true);
+        });
+        final file = File('${temp.path}${Platform.pathSeparator}lume.sqlite');
 
-      final legacy = AppDatabase(
-        NativeDatabase(
-          file,
-          enableMigrations: false,
-          setup: (database) => _buildLegacySchema(database, fromVersion),
-        ),
-      );
-      await legacy.customSelect('SELECT 1').get();
-      await legacy.close();
-
-      final migrated = AppDatabase(NativeDatabase(file));
-      addTearDown(migrated.close);
-
-      final userVersion = await migrated
-          .customSelect('PRAGMA user_version;')
-          .getSingle();
-      expect(userVersion.data.values.single, 6);
-
-      final snapshot = await migrated.loadSnapshot();
-      expect(snapshot.tasks.single.id, 'task-legada');
-      expect(snapshot.tasks.single.sourceNoteId, isNull);
-      expect(snapshot.notes.single.body, 'corpo preservado');
-      final record = snapshot.scheduledNotifications.single;
-      expect(record.id, 77);
-      expect(record.scheduledTimeZone, '');
-      expect(record.title, '');
-      if (fromVersion >= 3) {
-        expect(snapshot.deletedRecords.single.recordId, 'note-apagada');
-      } else {
-        expect(snapshot.deletedRecords, isEmpty);
-      }
-      expect(snapshot.reminders, isEmpty);
-
-      // O banco migrado precisa aceitar os dois caminhos de escrita.
-      final edited = snapshot.copyWith(
-        notes: [
-          snapshot.notes.single.copyWith(
-            body: 'corpo editado pós-migração',
-            updatedAtUtc: DateTime.now().toUtc(),
+        final legacy = AppDatabase(
+          NativeDatabase(
+            file,
+            enableMigrations: false,
+            setup: (database) => _buildLegacySchema(database, fromVersion),
           ),
-        ],
-      );
-      await migrated.applySnapshotDiff(snapshot, edited);
-      final roundTrip = await migrated.loadSnapshot();
-      expect(roundTrip.notes.single.body, 'corpo editado pós-migração');
-    });
+        );
+        await legacy.customSelect('SELECT 1').get();
+        await legacy.close();
+
+        final migrated = AppDatabase(NativeDatabase(file));
+        addTearDown(migrated.close);
+
+        final userVersion = await migrated
+            .customSelect('PRAGMA user_version;')
+            .getSingle();
+        expect(userVersion.data.values.single, 6);
+
+        final snapshot = await migrated.loadSnapshot();
+        expect(snapshot.tasks.single.id, 'task-legada');
+        expect(snapshot.tasks.single.sourceNoteId, isNull);
+        expect(snapshot.notes.single.body, 'corpo preservado');
+        final record = snapshot.scheduledNotifications.single;
+        expect(record.id, 77);
+        expect(record.scheduledTimeZone, '');
+        expect(record.title, '');
+        if (fromVersion >= 3) {
+          expect(snapshot.deletedRecords.single.recordId, 'note-apagada');
+        } else {
+          expect(snapshot.deletedRecords, isEmpty);
+        }
+        expect(snapshot.reminders, isEmpty);
+
+        // O banco migrado precisa aceitar os dois caminhos de escrita.
+        final edited = snapshot.copyWith(
+          notes: [
+            snapshot.notes.single.copyWith(
+              body: 'corpo editado pós-migração',
+              updatedAtUtc: DateTime.now().toUtc(),
+            ),
+          ],
+        );
+        await migrated.applySnapshotDiff(snapshot, edited);
+        final roundTrip = await migrated.loadSnapshot();
+        expect(roundTrip.notes.single.body, 'corpo editado pós-migração');
+      },
+    );
   }
 }

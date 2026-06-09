@@ -192,9 +192,7 @@ Widget _listItem(BuildContext context, md.Element item, int? ordinal) {
       ? Padding(
           padding: const EdgeInsets.only(top: 5, right: 6),
           child: Icon(
-            checked
-                ? Icons.check_box_outlined
-                : Icons.check_box_outline_blank,
+            checked ? Icons.check_box_outlined : Icons.check_box_outline_blank,
             size: 17,
             color: theme.colorScheme.primary,
           ),

@@ -20,10 +20,7 @@ void main() {
     );
 
     expect(find.text('Título principal', findRichText: true), findsOneWidget);
-    expect(
-      find.textContaining('negrito', findRichText: true),
-      findsOneWidget,
-    );
+    expect(find.textContaining('negrito', findRichText: true), findsOneWidget);
   });
 
   testWidgets('renderiza checklist GFM com ícones de caixa', (tester) async {
@@ -32,10 +29,7 @@ void main() {
     expect(find.byIcon(Icons.check_box_outlined), findsOneWidget);
     expect(find.byIcon(Icons.check_box_outline_blank), findsOneWidget);
     expect(find.textContaining('feito', findRichText: true), findsOneWidget);
-    expect(
-      find.textContaining('pendente', findRichText: true),
-      findsOneWidget,
-    );
+    expect(find.textContaining('pendente', findRichText: true), findsOneWidget);
   });
 
   testWidgets('renderiza listas ordenadas com numeração', (tester) async {

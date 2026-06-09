@@ -204,13 +204,10 @@ final class _CalendarDayButton extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(
                         entryCount.toString(),
-                        style: Theme.of(context).textTheme.labelSmall
-                            ?.copyWith(
-                              color: selected
-                                  ? scheme.onPrimary
-                                  : scheme.primary,
-                              fontWeight: FontWeight.w800,
-                            ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: selected ? scheme.onPrimary : scheme.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ],
                   ],

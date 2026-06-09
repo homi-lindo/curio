@@ -50,8 +50,9 @@ void notesTests() {
       );
     });
 
-    testWidgets('ExpansionTile Historico de autosave inicia fechado em Notas',
-        (tester) async {
+    testWidgets('ExpansionTile Historico de autosave inicia fechado em Notas', (
+      tester,
+    ) async {
       final harness = await pumpApp(tester);
       addTearDown(harness.dispose);
 

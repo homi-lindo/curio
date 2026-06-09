@@ -121,8 +121,10 @@ final class LocalSyncSidecar {
             payload['snapshot']! as Map<dynamic, dynamic>,
           ),
         );
-        final clockIssues = const SnapshotTimestampGuard()
-            .findFutureTimestamps(incoming, nowUtc: DateTime.now().toUtc());
+        final clockIssues = const SnapshotTimestampGuard().findFutureTimestamps(
+          incoming,
+          nowUtc: DateTime.now().toUtc(),
+        );
         if (clockIssues.isNotEmpty) {
           request.response.statusCode = HttpStatus.badRequest;
           await _writeJson(request.response, <String, Object?>{

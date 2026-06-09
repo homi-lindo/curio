@@ -354,8 +354,7 @@ final class _TableDiff<T> {
       final key = keyOf(item);
       nextKeys.add(key);
       final existing = previousByKey[key];
-      if (existing == null ||
-          !_jsonEquals(jsonOf(existing), jsonOf(item))) {
+      if (existing == null || !_jsonEquals(jsonOf(existing), jsonOf(item))) {
         upserts.add(item);
       }
     }
