@@ -55,6 +55,8 @@ dev_dependencies:
     sdk: flutter
   lume_sync_server:
     path: server
+  # Usado direto nos testes de migração (DDL legado via setup do NativeDatabase).
+  sqlite3: ^3.3.2
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

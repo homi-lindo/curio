@@ -1,12 +1,9 @@
 // pump_app.dart — boots CurioApp with in-memory stores for hermetic tests.
 //
-// NotificationService is a final class and FlutterLocalNotificationsPlugin
-// also has a private constructor, so subclassing/mocking is not possible from
-// outside the library. Instead we use the real NotificationService: on the
-// Windows test runner the platform channel calls are no-ops (zonedSchedule,
-// initialize, etc.) because the Windows platform plugin is not registered in
-// the test environment. Effects can still be observed via the app's _activity
-// log and snapshot state.
+// By default the real [NotificationService] is used: on the test runner the
+// platform calls are no-ops, so flows exercise the UI but not the scheduling
+// itself. Pass a [FakeNotificationGateway] via [notifications] when the test
+// needs to assert that reminders were actually scheduled/cancelled.
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -23,9 +20,11 @@ import 'package:lume/services/sync_settings_store.dart';
 /// Boots a hermetic [CurioApp] inside [tester].
 ///
 /// All store dependencies write to a temporary directory that is deleted on
-/// [TestHarness.dispose]. The real [NotificationService] is used; platform
-/// channel calls are silently no-ops in the test runner environment.
-Future<TestHarness> pumpApp(WidgetTester tester) async {
+/// [TestHarness.dispose].
+Future<TestHarness> pumpApp(
+  WidgetTester tester, {
+  NotificationGateway? notifications,
+}) async {
   final tmpDir = await Directory.systemTemp.createTemp('lume_e2e_');
 
   Future<Directory> tmpProvider() async => tmpDir;
@@ -33,9 +32,9 @@ Future<TestHarness> pumpApp(WidgetTester tester) async {
   final db = AppDatabase(NativeDatabase.memory());
   final store = LocalStore.withDatabase(db, directoryProvider: tmpProvider);
 
-  final notifications = NotificationService();
+  final gateway = notifications ?? NotificationService();
   final app = CurioApp(
-    notifications: notifications,
+    notifications: gateway,
     store: store,
     deviceIdentity: DeviceIdentityStore(directoryProvider: tmpProvider),
     syncSettings: SyncSettingsStore(directoryProvider: tmpProvider),
@@ -47,11 +46,7 @@ Future<TestHarness> pumpApp(WidgetTester tester) async {
   // Wait for _startup future (initialize + load snapshot).
   await tester.pumpAndSettle(const Duration(seconds: 3));
 
-  return TestHarness(
-    notifications: notifications,
-    store: store,
-    tmpDir: tmpDir,
-  );
+  return TestHarness(notifications: gateway, store: store, tmpDir: tmpDir);
 }
 
 final class TestHarness {
@@ -61,7 +56,7 @@ final class TestHarness {
     required this.tmpDir,
   });
 
-  final NotificationService notifications;
+  final NotificationGateway notifications;
   final LocalStore store;
   final Directory tmpDir;
 

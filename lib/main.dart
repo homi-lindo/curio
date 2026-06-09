@@ -78,7 +78,7 @@ final class CurioApp extends StatefulWidget {
        alarmPlayback = alarmPlayback ?? AlarmPlaybackService(),
        noteHistory = noteHistory ?? NoteEditHistoryStore();
 
-  final NotificationService notifications;
+  final NotificationGateway notifications;
   final LocalStore store;
   final DeviceIdentityStore deviceIdentity;
   final SyncSettingsStore syncSettings;

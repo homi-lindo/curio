@@ -78,17 +78,53 @@ final class ScheduleResult {
   String get deliveryLabel => permissionState.deliveryLabel;
 }
 
-final class NotificationService {
+/// Superfície de notificações que o app consome. `NotificationService` é a
+/// implementação real sobre `flutter_local_notifications`; testes injetam um
+/// fake (lib/services/testing/) já que a classe do plugin não é mockável de
+/// fora.
+abstract interface class NotificationGateway {
+  String get localTimeZoneId;
+
+  Future<void> initialize({
+    void Function(String? payload)? onNotificationSelected,
+  });
+
+  Future<NotificationAppLaunchDetails?> getLaunchDetails();
+
+  Future<NotificationPermissionState> requestPermissions();
+
+  Future<NotificationPermissionState> currentPermissionState();
+
+  Future<NotificationPermissionState> requestMissingSchedulePermissions({
+    NotificationPermissionState? current,
+  });
+
+  Future<ScheduleResult?> scheduleReminder({
+    required ReminderIntent intent,
+    required String deviceId,
+    required String title,
+    required String body,
+    tz.TZDateTime? now,
+  });
+
+  Future<void> cancel(int notificationId);
+
+  Future<List<PendingNotificationRequest>> pending();
+}
+
+final class NotificationService implements NotificationGateway {
   NotificationService({FlutterLocalNotificationsPlugin? plugin})
     : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
 
   final FlutterLocalNotificationsPlugin _plugin;
   final OccurrenceCalculator _calculator = const OccurrenceCalculator();
 
+  @override
   late final String localTimeZoneId;
 
   tz.Location get localLocation => tz.local;
 
+  @override
   Future<void> initialize({
     void Function(String? payload)? onNotificationSelected,
   }) async {
@@ -111,10 +147,12 @@ final class NotificationService {
     );
   }
 
+  @override
   Future<NotificationAppLaunchDetails?> getLaunchDetails() {
     return _plugin.getNotificationAppLaunchDetails();
   }
 
+  @override
   Future<NotificationPermissionState> requestPermissions() async {
     final android = _plugin
         .resolvePlatformSpecificImplementation<
@@ -136,6 +174,7 @@ final class NotificationService {
     );
   }
 
+  @override
   Future<NotificationPermissionState> currentPermissionState() async {
     final android = _plugin
         .resolvePlatformSpecificImplementation<
@@ -152,6 +191,7 @@ final class NotificationService {
     );
   }
 
+  @override
   Future<NotificationPermissionState> requestMissingSchedulePermissions({
     NotificationPermissionState? current,
   }) async {
@@ -182,6 +222,7 @@ final class NotificationService {
     );
   }
 
+  @override
   Future<ScheduleResult?> scheduleReminder({
     required ReminderIntent intent,
     required String deviceId,
@@ -254,10 +295,12 @@ final class NotificationService {
     );
   }
 
+  @override
   Future<void> cancel(int notificationId) {
     return _plugin.cancel(id: notificationId);
   }
 
+  @override
   Future<List<PendingNotificationRequest>> pending() {
     return _plugin.pendingNotificationRequests();
   }
