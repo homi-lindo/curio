@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:lume_core/domain/app_snapshot.dart';
+import 'package:lume_core/sync/serial_task_queue.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 
 typedef SnapshotLoader = Future<AppSnapshot> Function();
@@ -22,6 +23,11 @@ final class LocalSyncSidecar {
 
   HttpServer? _server;
   LocalSyncSidecarState? _state;
+
+  /// Serializa a seção read→merge→save de `/sync`: dois clientes simultâneos
+  /// nunca podem intercalar a mutação do estado, ou o save de um engole o
+  /// merge do outro.
+  final SerialTaskQueue _stateLock = SerialTaskQueue();
 
   LocalSyncSidecarState? get state => _state;
   bool get isRunning => _server != null;
@@ -66,8 +72,14 @@ final class LocalSyncSidecar {
 
   Future<void> _serve(HttpServer server, String token) async {
     try {
+      // Despacho concorrente: um upload lento não bloqueia /health. A mutação
+      // de estado continua serializada pelo [_stateLock] dentro do handler.
       await for (final request in server) {
-        await _handleRequest(request, token);
+        unawaited(
+          _handleRequest(request, token).catchError((Object _) {
+            // Falha ao responder (ex.: cliente desconectou). Nada a fazer.
+          }),
+        );
       }
     } on Object {
       _server = null;
@@ -103,12 +115,15 @@ final class LocalSyncSidecar {
             payload['snapshot']! as Map<dynamic, dynamic>,
           ),
         );
-        final current = await loadSnapshot();
-        final next = const SnapshotSyncMerger().merge(
-          local: current,
-          remote: _syncable(incoming),
-        );
-        await saveSnapshot(next);
+        final next = await _stateLock.run(() async {
+          final current = await loadSnapshot();
+          final merged = const SnapshotSyncMerger().merge(
+            local: current,
+            remote: _syncable(incoming),
+          );
+          await saveSnapshot(merged);
+          return merged;
+        });
         await _writeJson(request.response, <String, Object?>{
           'snapshot': _syncable(next).toJson(),
           'serverTimeUtc': DateTime.now().toUtc().toIso8601String(),

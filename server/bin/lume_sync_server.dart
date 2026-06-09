@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:lume_core/domain/app_snapshot.dart';
+import 'package:lume_core/sync/serial_task_queue.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 import 'package:lume_core/sync/sync_pairing.dart';
 import 'package:lume_sync_server/cert_fingerprint.dart';
@@ -43,8 +45,19 @@ Future<void> main(List<String> args) async {
   }
   _printPairing(config, scheme, server.port);
 
+  // As requisições são atendidas concorrentemente (um upload lento não
+  // bloqueia /health), mas a seção read→merge→save do estado é serializada
+  // pelo [stateLock] — sem ele, dois POST /sync simultâneos fariam o segundo
+  // save engolir o merge do primeiro.
+  final stateLock = SerialTaskQueue();
   await for (final request in server) {
-    await _handleRequest(request, store, config);
+    unawaited(
+      _handleRequest(request, store, config, stateLock).catchError((
+        Object error,
+      ) {
+        stderr.writeln('Curió sync request failed: ${error.runtimeType}');
+      }),
+    );
   }
 }
 
@@ -111,6 +124,7 @@ Future<void> _handleRequest(
   HttpRequest request,
   ServerSnapshotStore store,
   _ServerConfig config,
+  SerialTaskQueue stateLock,
 ) async {
   try {
     _setCommonHeaders(request.response, config);
@@ -153,15 +167,24 @@ Future<void> _handleRequest(
           payload['snapshot']! as Map<dynamic, dynamic>,
         ),
       );
-      final current = await store.load();
-      final merged = const SnapshotSyncMerger().merge(
-        local: current,
-        remote: syncableServerSnapshot(incoming),
-      );
-      // Bound long-term growth of the shared state with the same retention
-      // policy the clients use.
-      final next = compactSnapshot(merged, nowUtc: DateTime.now().toUtc());
-      await store.save(next);
+      // Somente a mutação do estado entra no lock: a leitura do corpo (acima)
+      // e a escrita da resposta (abaixo) podem rodar em paralelo com outras
+      // requisições.
+      final next = await stateLock.run(() async {
+        final current = await store.load();
+        final merged = const SnapshotSyncMerger().merge(
+          local: current,
+          remote: syncableServerSnapshot(incoming),
+        );
+        // Bound long-term growth of the shared state with the same retention
+        // policy the clients use.
+        final compacted = compactSnapshot(
+          merged,
+          nowUtc: DateTime.now().toUtc(),
+        );
+        await store.save(compacted);
+        return compacted;
+      });
 
       await _writeJson(request.response, <String, Object?>{
         'deviceId': deviceId,
