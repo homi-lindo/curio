@@ -15,6 +15,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_brand.dart';
 import 'services/action_error_describer.dart';
+import 'services/activity_log_store.dart';
 import 'services/alarm_playback_service.dart';
 import 'services/alarm_settings_store.dart';
 import 'services/appearance_settings_store.dart';
@@ -70,13 +71,15 @@ final class CurioApp extends StatefulWidget {
     AlarmSettingsStore? alarmSettings,
     AlarmPlaybackService? alarmPlayback,
     NoteEditHistoryStore? noteHistory,
+    ActivityLogStore? activityLog,
   }) : store = store ?? LocalStore(),
        deviceIdentity = deviceIdentity ?? DeviceIdentityStore(),
        syncSettings = syncSettings ?? SyncSettingsStore(),
        appearanceSettings = appearanceSettings ?? AppearanceSettingsStore(),
        alarmSettings = alarmSettings ?? AlarmSettingsStore(),
        alarmPlayback = alarmPlayback ?? AlarmPlaybackService(),
-       noteHistory = noteHistory ?? NoteEditHistoryStore();
+       noteHistory = noteHistory ?? NoteEditHistoryStore(),
+       activityLog = activityLog ?? ActivityLogStore();
 
   final NotificationGateway notifications;
   final LocalStore store;
@@ -86,6 +89,7 @@ final class CurioApp extends StatefulWidget {
   final AlarmSettingsStore alarmSettings;
   final AlarmPlaybackService alarmPlayback;
   final NoteEditHistoryStore noteHistory;
+  final ActivityLogStore activityLog;
 
   @override
   State<CurioApp> createState() => _CurioAppState();
@@ -150,6 +154,7 @@ final class _CurioAppState extends State<CurioApp>
   bool _notificationComposerOpen = false;
   int _pendingCount = 0;
   final List<String> _activity = <String>[];
+  String? _activityLogPath;
 
   @override
   void initState() {
@@ -231,6 +236,12 @@ final class _CurioAppState extends State<CurioApp>
 
     final notificationsReady = await _initializeNotificationsSafely();
     await widget.store.file;
+    try {
+      final logFile = await widget.activityLog.file;
+      _applyState(() => _activityLogPath = logFile.path);
+    } on Object {
+      // Sem o caminho, a aba Sync apenas omite a linha do log.
+    }
     _log('armazenamento local pronto');
     _log('identidade local pronta');
     if (notificationsReady) {
@@ -1257,6 +1268,9 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   void _log(String message) {
+    // Persistência best-effort para diagnóstico pós-fechamento; o buffer em
+    // memória continua sendo a fonte da UI.
+    unawaited(widget.activityLog.append(message));
     if (!mounted) {
       _activity.insert(0, message);
       if (_activity.length > 50) {
@@ -1448,6 +1462,7 @@ final class _CurioAppState extends State<CurioApp>
                   SyncView(
                     busy: _busy,
                     deviceId: _deviceId,
+                    activityLogPath: _activityLogPath,
                     controller: _syncServerController,
                     tokenController: _syncTokenController,
                     settings: _syncSettings,

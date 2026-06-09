@@ -10,6 +10,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lume/data/app_database.dart';
 import 'package:lume/main.dart';
+import 'package:lume/services/activity_log_store.dart';
 import 'package:lume/services/appearance_settings_store.dart';
 import 'package:lume/services/device_identity.dart';
 import 'package:lume/services/local_store.dart';
@@ -40,6 +41,7 @@ Future<TestHarness> pumpApp(
     syncSettings: SyncSettingsStore(directoryProvider: tmpProvider),
     appearanceSettings: AppearanceSettingsStore(directoryProvider: tmpProvider),
     noteHistory: NoteEditHistoryStore(directoryProvider: tmpProvider),
+    activityLog: ActivityLogStore(directoryProvider: tmpProvider),
   );
 
   await tester.pumpWidget(app);

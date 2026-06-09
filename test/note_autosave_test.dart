@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lume/data/app_database.dart';
 import 'package:lume/main.dart';
+import 'package:lume/services/activity_log_store.dart';
 import 'package:lume/services/alarm_settings_store.dart';
 import 'package:lume/services/appearance_settings_store.dart';
 import 'package:lume/services/device_identity.dart';
@@ -88,6 +89,7 @@ Future<_Harness> _bootApp(WidgetTester tester) async {
     appearanceSettings: AppearanceSettingsStore(directoryProvider: tmpProvider),
     alarmSettings: AlarmSettingsStore(directoryProvider: tmpProvider),
     noteHistory: NoteEditHistoryStore(directoryProvider: tmpProvider),
+    activityLog: ActivityLogStore(directoryProvider: tmpProvider),
   );
 
   await tester.pumpWidget(app);
