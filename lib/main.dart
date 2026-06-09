@@ -93,6 +93,11 @@ final class CurioApp extends StatefulWidget {
 
 final class _CurioAppState extends State<CurioApp>
     with _TaskActions, _BackupActions, _SyncActions {
+  /// Janela do autosave do editor: curta o bastante para o usuário nunca
+  /// perceber, longa o bastante para coalescer a digitação contínua em uma
+  /// única escrita no banco.
+  static const Duration _noteAutosaveDelay = Duration(milliseconds: 500);
+
   late final Future<void> _startup;
   late final TextEditingController _noteController;
   @override
@@ -138,6 +143,8 @@ final class _CurioAppState extends State<CurioApp>
   List<NoteEditRevision> _noteHistory = const <NoteEditRevision>[];
   final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
   final Map<int, Timer> _localAlarmTimers = <int, Timer>{};
+  Timer? _noteAutosaveDebounce;
+  bool _noteAutosaveDirty = false;
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
   bool _notificationComposerOpen = false;
@@ -154,9 +161,16 @@ final class _CurioAppState extends State<CurioApp>
     _syncSidecar = LocalSyncSidecar(
       loadSnapshot: () async => _snapshot ?? await widget.store.load(),
       saveSnapshot: (snapshot) async {
-        await _saveSnapshot(snapshot);
+        // O sidecar montou `snapshot` a partir de uma leitura anterior de
+        // `_snapshot`; edições locais feitas nesse meio-tempo (ex.: digitação
+        // no editor) precisam ser fundidas para não serem revertidas.
+        final latest = _snapshot;
+        final next = latest == null || identical(latest, snapshot)
+            ? snapshot
+            : const SnapshotSyncMerger().merge(local: latest, remote: snapshot);
+        await _saveSnapshot(next);
         if (mounted) {
-          setState(() => _syncSelectionAfterSnapshot(snapshot));
+          setState(() => _syncSelectionAfterSnapshot(next));
         }
       },
     );
@@ -165,6 +179,7 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   void dispose() {
+    _flushNoteAutosave();
     _noteController.dispose();
     _syncServerController.dispose();
     _syncTokenController.dispose();
@@ -930,8 +945,32 @@ final class _CurioAppState extends State<CurioApp>
         return note.copyWith(body: body, updatedAtUtc: now);
       }).toList(),
     );
+    // O texto digitado entra em `_snapshot` imediatamente (sync e demais ações
+    // leem daqui), mas a persistência é adiada: sem o debounce cada tecla
+    // reescreveria o banco inteiro via replaceSnapshot.
+    _snapshot = next;
+    _noteAutosaveDirty = true;
+    _noteAutosaveDebounce?.cancel();
+    _noteAutosaveDebounce = Timer(_noteAutosaveDelay, _flushNoteAutosave);
+  }
+
+  /// Persists the latest in-memory snapshot if the note editor has unsaved
+  /// keystrokes. Safe to call at any time; saving the current `_snapshot` can
+  /// only re-write data that newer actions already persisted.
+  void _flushNoteAutosave() {
+    _noteAutosaveDebounce?.cancel();
+    _noteAutosaveDebounce = null;
+    if (!_noteAutosaveDirty) {
+      return;
+    }
+    _noteAutosaveDirty = false;
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
     unawaited(
-      _saveSnapshot(next).catchError((Object error, StackTrace stackTrace) {
+      _saveSnapshot(snapshot).catchError((Object error, StackTrace stackTrace) {
+        _noteAutosaveDirty = true;
         _log('nota não salva: ${_errorDescriber.describe(error)}');
       }),
     );
@@ -1020,7 +1059,12 @@ final class _CurioAppState extends State<CurioApp>
         : snapshot.notes.where((note) => note.id == selectedId).firstOrNull;
     final nextSelected = selected ?? snapshot.notes.firstOrNull;
     _selectedNoteId = nextSelected?.id;
-    _noteController.text = nextSelected?.body ?? '';
+    final nextBody = nextSelected?.body ?? '';
+    // Reatribuir o mesmo texto reposiciona o cursor no início — irritante
+    // quando um sync em segundo plano termina no meio da digitação.
+    if (_noteController.text != nextBody) {
+      _noteController.text = nextBody;
+    }
   }
 
   void _refreshLocalAlarmTimers(
@@ -1154,9 +1198,15 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   Future<void> _saveSnapshot(AppSnapshot snapshot) async {
-    await _snapshotWrites.save(snapshot);
+    // O estado em memória muda de forma síncrona (antes de qualquer await):
+    // assim quem leu `_snapshot` no mesmo microtask nunca observa rollback
+    // enquanto a escrita em disco está em voo. Quando o snapshot já é o
+    // atual (ex.: flush do autosave), não há rebuild a fazer.
     _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
-    _applyState(() => _snapshot = snapshot);
+    if (!identical(_snapshot, snapshot)) {
+      _applyState(() => _snapshot = snapshot);
+    }
+    await _snapshotWrites.save(snapshot);
   }
 
   @override
