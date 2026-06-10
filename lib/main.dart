@@ -33,6 +33,7 @@ import 'services/notification_service.dart';
 import 'services/notification_timezone_audit.dart';
 import 'services/sync_settings_store.dart';
 import 'state/app_state_controller.dart';
+import 'state/tasks_controller.dart';
 import 'services/sync_settings_validator.dart';
 import 'services/windows_attention_service.dart';
 import 'sync/http_sync_adapter.dart';
@@ -50,7 +51,6 @@ import 'ui/zoomed_page.dart';
 
 part 'main_backup_actions.dart';
 part 'main_sync_actions.dart';
-part 'main_task_actions.dart';
 
 Future<void> main() async {
   LumeWidgetsBinding.ensureInitialized();
@@ -97,7 +97,7 @@ final class CurioApp extends StatefulWidget {
 }
 
 final class _CurioAppState extends State<CurioApp>
-    with _TaskActions, _BackupActions, _SyncActions {
+    with _BackupActions, _SyncActions {
   /// Janela do autosave do editor: curta o bastante para o usuário nunca
   /// perceber, longa o bastante para coalescer a digitação contínua em uma
   /// única escrita no banco.
@@ -112,6 +112,7 @@ final class _CurioAppState extends State<CurioApp>
   @override
   late final LocalSyncSidecar _syncSidecar;
   late final AppStateController _appState;
+  late final TasksController _tasksController;
   final AsyncActionGate _actionGate = AsyncActionGate();
   @override
   final ActionErrorDescriber _errorDescriber = const ActionErrorDescriber();
@@ -172,6 +173,7 @@ final class _CurioAppState extends State<CurioApp>
       store: widget.store,
       activityLog: widget.activityLog,
     );
+    _tasksController = TasksController(_appState);
     // As views ainda recebem o estado por props: qualquer mudança publicada
     // no controller vira um rebuild aqui até a migração view a view terminar.
     _appState.addListener(() => _applyState(() {}));
@@ -925,6 +927,110 @@ final class _CurioAppState extends State<CurioApp>
     }
   }
 
+  // --- Tarefas -------------------------------------------------------------
+  // A lógica de domínio vive no TasksController (lib/state/); aqui fica só a
+  // cola de UI que a receita manda manter no host: prompts, pickers, diálogo
+  // de confirmação e navegação de aba.
+
+  void _setTaskFilter(TaskFilter filter) {
+    setState(() => _taskFilter = filter);
+  }
+
+  Future<void> _addTask() async {
+    final title = await _promptText(
+      title: 'Nova tarefa',
+      hint: 'Descrição da tarefa',
+      confirmLabel: 'Criar',
+    );
+    if (title == null || title.trim().isEmpty) {
+      return;
+    }
+    await _tasksController.create(title.trim());
+  }
+
+  Future<void> _createTaskFromSelectedNote() async {
+    final note = _selectedNote(_snapshot);
+    if (note == null) {
+      return;
+    }
+    await _tasksController.createFromNote(note);
+    _applyState(() => _selectedIndex = _AppTab.tasks.index);
+  }
+
+  Future<void> _toggleTaskDone(TaskItem task) {
+    return _tasksController.toggleDone(task);
+  }
+
+  Future<void> _renameTask(TaskItem task) async {
+    final title = await _promptText(
+      title: 'Renomear tarefa',
+      hint: 'Descrição da tarefa',
+      initialValue: task.title,
+      confirmLabel: 'Salvar',
+    );
+    if (title == null || title.trim().isEmpty) {
+      return;
+    }
+    await _tasksController.rename(task, title.trim());
+  }
+
+  Future<void> _setTaskDue(TaskItem task) async {
+    final initialLocal =
+        task.dueAtUtc?.toLocal() ??
+        defaultNotificationLocalForDate(DateTime.now());
+    final date = await showDatePicker(
+      context: _dialogContext,
+      initialDate: initialLocal,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2100),
+    );
+    if (date == null || !mounted) {
+      return;
+    }
+    final time = await showTimePicker(
+      context: _dialogContext,
+      initialTime: TimeOfDay.fromDateTime(initialLocal),
+    );
+    final dueLocal = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time?.hour ?? initialLocal.hour,
+      time?.minute ?? initialLocal.minute,
+    );
+    await _tasksController.setDue(task, dueLocal);
+  }
+
+  Future<void> _clearTaskDue(TaskItem task) {
+    return _tasksController.clearDue(task);
+  }
+
+  Future<void> _deleteTask(TaskItem task) async {
+    final confirmed = await showDialog<bool>(
+      context: _dialogContext,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Excluir tarefa'),
+          content: Text('Excluir "${task.title}"?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await _tasksController.delete(task, deviceId: _deviceId);
+  }
+
   void _setUiZoom(double value) {
     final clamped = clampPageZoom(value);
     setState(() => _uiZoom = clamped);
@@ -938,7 +1044,6 @@ final class _CurioAppState extends State<CurioApp>
     _setUiZoom(stepPageZoom(_uiZoom, steps));
   }
 
-  @override
   NoteItem? _selectedNote(AppSnapshot? snapshot) {
     final selectedNoteId = _selectedNoteId;
     if (snapshot == null || selectedNoteId == null) {
@@ -1233,7 +1338,6 @@ final class _CurioAppState extends State<CurioApp>
     await _appState.save(snapshot);
   }
 
-  @override
   Future<String?> _promptText({
     required String title,
     required String hint,

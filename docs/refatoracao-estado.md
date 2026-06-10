@@ -30,10 +30,25 @@ Invariantes preservados (não os quebre nas próximas fatias):
 3. **Escrita serializada e por diff**: tudo passa pela `SnapshotWriteQueue`;
    `prime(loaded)` no boot habilita o diff.
 
+### Fatia Tarefas (feita)
+
+`lib/state/tasks_controller.dart` absorveu a lógica do mixin `_TaskActions`
+(aposentado): criar, criar-da-nota, alternar feito, renomear, definir/limpar
+data e excluir com tombstone. Entradas de diálogo/picker viram parâmetros; o
+host mantém só a cola de UI (prompts, confirmação, navegação de aba) e o
+`_taskFilter`, que é estado de exibição. Coberta por
+`test/tasks_controller_test.dart` contra o banco real — coisa que o mixin
+nunca permitiu.
+
+Nota honesta: a `TasksView` continua prop-driven nesta fatia. Ligar a view
+direto no controller só traz ganho real quando o listener-ponte global
+morrer; faça essa ligação quando a view for tocada por outra razão, ou na
+varredura final.
+
 ## Receita para as próximas fatias (view a view)
 
 Ordem sugerida, da mais simples para a mais arriscada:
-Tarefas → Quadro → Agenda → Hoje → Notas → Sync.
+Quadro → Agenda → Hoje → Notas → Sync.
 
 Para cada domínio (exemplo com Tarefas):
 
