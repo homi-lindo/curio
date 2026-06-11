@@ -325,15 +325,22 @@ final class NotificationService implements NotificationGateway {
   );
 
   Future<String> _configureLocalTimeZone() async {
-    tzdata.initializeTimeZones();
-
+    // Tudo dentro do try: se até o initializeTimeZones lançar, o campo
+    // `localTimeZoneId` ainda recebe 'UTC' — um late final não atribuído
+    // viraria LateInitializationError nos fluxos de import/restore que o
+    // leem sem passar pela inicialização de notificações.
     try {
+      tzdata.initializeTimeZones();
       final timeZoneId = const LocalTimeZoneResolver().resolve();
       tz.setLocalLocation(tz.getLocation(timeZoneId));
       return timeZoneId;
     } catch (_) {
       debugPrint('$appDisplayName timezone fallback: UTC');
-      tz.setLocalLocation(tz.UTC);
+      try {
+        tz.setLocalLocation(tz.UTC);
+      } catch (_) {
+        // Sem tzdata nem para UTC; quem agendar vai falhar e logar.
+      }
       return 'UTC';
     }
   }

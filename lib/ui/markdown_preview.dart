@@ -287,16 +287,13 @@ TextSpan _inline(BuildContext context, List<md.Node> nodes) {
       case 'br':
         spans.add(TextSpan(text: '\n', style: style));
       case 'input':
+        // TextSpan em vez de WidgetSpan: um WidgetSpan interrompe a seleção
+        // do SelectionArea no meio do parágrafo. Checklists normais nem
+        // passam por aqui (o _listItem renderiza o marcador como Icon).
         spans.add(
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: Icon(
-              node.attributes['checked'] != null
-                  ? Icons.check_box_outlined
-                  : Icons.check_box_outline_blank,
-              size: 16,
-              color: theme.colorScheme.primary,
-            ),
+          TextSpan(
+            text: node.attributes['checked'] != null ? '☑ ' : '☐ ',
+            style: style.copyWith(color: theme.colorScheme.primary),
           ),
         );
       default:

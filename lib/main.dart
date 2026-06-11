@@ -189,7 +189,10 @@ final class _CurioAppState extends State<CurioApp>
             : const SnapshotSyncMerger().merge(local: latest, remote: snapshot);
         await _saveSnapshot(next);
         if (mounted) {
-          setState(() => _syncSelectionAfterSnapshot(next));
+          // Sempre contra o estado ATUAL: teclas digitadas durante a escrita
+          // em disco acima já estão em `_snapshot`; usar o `next` capturado
+          // faria o editor regredir para o texto pré-digitação.
+          setState(() => _syncSelectionAfterSnapshot(_snapshot ?? next));
         }
       },
     );

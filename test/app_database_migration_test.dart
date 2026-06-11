@@ -105,20 +105,16 @@ void _buildLegacySchema(sqlite3.Database database, int version) {
 }
 
 void main() {
-  test(
-    'database migration v1 to v5 adds sync and notification columns',
-    () async {
-      final temp = await Directory.systemTemp.createTemp(
-        'lume_migration_test_',
-      );
-      final file = File('${temp.path}${Platform.pathSeparator}lume.sqlite');
+  test('database migration v1 to v5 adds sync and notification columns', () async {
+    final temp = await Directory.systemTemp.createTemp('lume_migration_test_');
+    final file = File('${temp.path}${Platform.pathSeparator}lume.sqlite');
 
-      final legacy = AppDatabase(
-        NativeDatabase(
-          file,
-          enableMigrations: false,
-          setup: (database) {
-            database.execute('''
+    final legacy = AppDatabase(
+      NativeDatabase(
+        file,
+        enableMigrations: false,
+        setup: (database) {
+          database.execute('''
             CREATE TABLE task_rows (
               id TEXT NOT NULL PRIMARY KEY,
               title TEXT NOT NULL,
@@ -132,7 +128,7 @@ void main() {
               updated_at_utc INTEGER NOT NULL
             );
           ''');
-            database.execute('''
+          database.execute('''
             CREATE TABLE note_rows (
               id TEXT NOT NULL PRIMARY KEY,
               title TEXT NOT NULL,
@@ -141,7 +137,7 @@ void main() {
               updated_at_utc INTEGER NOT NULL
             );
           ''');
-            database.execute('''
+          database.execute('''
             CREATE TABLE scheduled_notification_rows (
               id INTEGER NOT NULL PRIMARY KEY,
               device_id TEXT NOT NULL,
@@ -153,48 +149,55 @@ void main() {
               payload TEXT NOT NULL
             );
           ''');
-            database.execute('PRAGMA user_version = 1;');
-          },
-        ),
-      );
+          database.execute('PRAGMA user_version = 1;');
+        },
+      ),
+    );
 
-      addTearDown(() async {
-        await temp.delete(recursive: true);
-      });
+    addTearDown(() async {
+      await temp.delete(recursive: true);
+    });
 
-      await legacy.customSelect('SELECT 1').get();
-      await legacy.close();
+    await legacy.customSelect('SELECT 1').get();
+    await legacy.close();
 
-      final migrated = AppDatabase(NativeDatabase(file));
-      addTearDown(migrated.close);
+    final migrated = AppDatabase(NativeDatabase(file));
+    addTearDown(migrated.close);
 
-      final columns = await migrated
-          .customSelect("PRAGMA table_info('task_rows');")
-          .get();
-      final notificationColumns = await migrated
-          .customSelect("PRAGMA table_info('scheduled_notification_rows');")
-          .get();
-      final deletedTable = await migrated
-          .customSelect(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'deleted_record_rows';",
-          )
-          .get();
+    final columns = await migrated
+        .customSelect("PRAGMA table_info('task_rows');")
+        .get();
+    final notificationColumns = await migrated
+        .customSelect("PRAGMA table_info('scheduled_notification_rows');")
+        .get();
+    final deletedTable = await migrated
+        .customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'deleted_record_rows';",
+        )
+        .get();
 
-      expect(
-        columns.map((row) => row.data['name']),
-        contains('source_note_id'),
-      );
-      expect(
-        notificationColumns.map((row) => row.data['name']),
-        contains('scheduled_time_zone'),
-      );
-      expect(
-        notificationColumns.map((row) => row.data['name']),
-        containsAll(<String>['title', 'body']),
-      );
-      expect(deletedTable, hasLength(1));
-    },
-  );
+    expect(columns.map((row) => row.data['name']), contains('source_note_id'));
+    expect(
+      notificationColumns.map((row) => row.data['name']),
+      contains('scheduled_time_zone'),
+    );
+    expect(
+      notificationColumns.map((row) => row.data['name']),
+      containsAll(<String>['title', 'body']),
+    );
+    expect(deletedTable, hasLength(1));
+
+    final reminderTable = await migrated
+        .customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'reminder_rows';",
+        )
+        .get();
+    expect(
+      reminderTable,
+      hasLength(1),
+      reason: 'a migração v6 precisa criar reminder_rows',
+    );
+  });
 
   for (var fromVersion = 1; fromVersion <= 5; fromVersion++) {
     test(
