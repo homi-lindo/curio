@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -56,6 +57,23 @@ void main() {
     if (await active.exists()) {
       expect(await active.length(), lessThanOrEqualTo(120));
     }
+  });
+
+  test('flush aguarda appends fire-and-forget pendentes', () async {
+    final log = store();
+    for (var index = 0; index < 10; index++) {
+      // Sem await, como o AppStateController dispara na prática.
+      unawaited(log.append('pendente $index'));
+    }
+
+    await log.flush();
+
+    final content = await (await log.file).readAsString();
+    expect(
+      content.trim().split('\n'),
+      hasLength(10),
+      reason: 'após o flush não pode haver escrita em voo',
+    );
   });
 
   test('quebras de linha na mensagem viram espaço', () async {

@@ -60,10 +60,11 @@ final class _CountingDatabase extends AppDatabase {
 }
 
 final class _Harness {
-  _Harness({required this.db, required this.tmpDir});
+  _Harness({required this.db, required this.tmpDir, required this.activityLog});
 
   final _CountingDatabase db;
   final Directory tmpDir;
+  final ActivityLogStore activityLog;
 }
 
 Future<_Harness> _bootApp(WidgetTester tester) async {
@@ -75,6 +76,7 @@ Future<_Harness> _bootApp(WidgetTester tester) async {
 
   final db = _CountingDatabase(NativeDatabase.memory());
   final store = LocalStore.withDatabase(db, directoryProvider: tmpProvider);
+  final activityLog = ActivityLogStore(directoryProvider: tmpProvider);
 
   final app = CurioApp(
     notifications: NotificationService(),
@@ -89,7 +91,7 @@ Future<_Harness> _bootApp(WidgetTester tester) async {
     appearanceSettings: AppearanceSettingsStore(directoryProvider: tmpProvider),
     alarmSettings: AlarmSettingsStore(directoryProvider: tmpProvider),
     noteHistory: NoteEditHistoryStore(directoryProvider: tmpProvider),
-    activityLog: ActivityLogStore(directoryProvider: tmpProvider),
+    activityLog: activityLog,
   );
 
   await tester.pumpWidget(app);
@@ -112,10 +114,13 @@ Future<_Harness> _bootApp(WidgetTester tester) async {
     fail('o app não terminou o boot; textos visíveis: $texts');
   }
 
-  return _Harness(db: db, tmpDir: tmpDir);
+  return _Harness(db: db, tmpDir: tmpDir, activityLog: activityLog);
 }
 
 Future<void> _disposeHarness(WidgetTester tester, _Harness harness) async {
+  // NÃO aguarde activityLog.flush() aqui: os appends foram disparados na zona
+  // FakeAsync do testWidgets e suas continuations só drenam via pump —
+  // esperar dentro de runAsync deadlocka. O delete abaixo já é best-effort.
   await tester.runAsync(() async {
     await harness.db.close();
     try {
