@@ -23,6 +23,26 @@ Future<void> main(List<String> args) async {
   }
 
   final store = ServerSnapshotStore(config.file);
+  // O guard de clock skew valida snapshots que CHEGAM; se o estado do
+  // servidor já foi contaminado (por uma versão sem o guard), todo cliente
+  // são passa a receber 400 ao reenviar o estado contaminado — um impasse
+  // sem saída automática. O aviso no boot dá o diagnóstico e a saída manual.
+  try {
+    final existingIssues = const SnapshotTimestampGuard().findFutureTimestamps(
+      await store.load(),
+      nowUtc: DateTime.now().toUtc(),
+    );
+    if (existingIssues.isNotEmpty) {
+      stderr.writeln(
+        'AVISO: o estado salvo contém ${existingIssues.length} registro(s) '
+        'com data no futuro (ex.: ${existingIssues.first}). Clientes sãos '
+        'serão rejeitados ao reenviar esse estado. Corrija editando/apagando '
+        'o arquivo de estado (server-state.json) com o servidor parado.',
+      );
+    }
+  } on Object {
+    // Estado ilegível aqui não é fatal; o load do primeiro /sync reporta.
+  }
   final server = config.tlsEnabled
       ? await HttpServer.bindSecure(
           config.host,
