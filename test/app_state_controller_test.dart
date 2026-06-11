@@ -11,18 +11,23 @@ import 'dart:io';
 void main() {
   late Directory tmpDir;
   late AppDatabase db;
+  late ActivityLogStore activityLog;
   late AppStateController controller;
 
   setUp(() async {
     tmpDir = await Directory.systemTemp.createTemp('lume_controller_');
     db = AppDatabase(NativeDatabase.memory());
+    activityLog = ActivityLogStore(directoryProvider: () async => tmpDir);
     controller = AppStateController(
       store: LocalStore.withDatabase(db, directoryProvider: () async => tmpDir),
-      activityLog: ActivityLogStore(directoryProvider: () async => tmpDir),
+      activityLog: activityLog,
     );
   });
 
   tearDown(() async {
+    // Drena os appends fire-and-forget do log antes de apagar o diretório;
+    // sem isso o delete corre contra a fila e falha no Linux.
+    await activityLog.flush();
     await db.close();
     await tmpDir.delete(recursive: true);
   });

@@ -15,15 +15,17 @@ import 'package:lume_core/domain/app_snapshot.dart';
 void main() {
   late Directory tmpDir;
   late AppDatabase db;
+  late ActivityLogStore activityLog;
   late AppStateController appState;
   late TasksController controller;
 
   setUp(() async {
     tmpDir = await Directory.systemTemp.createTemp('lume_tasks_');
     db = AppDatabase(NativeDatabase.memory());
+    activityLog = ActivityLogStore(directoryProvider: () async => tmpDir);
     appState = AppStateController(
       store: LocalStore.withDatabase(db, directoryProvider: () async => tmpDir),
-      activityLog: ActivityLogStore(directoryProvider: () async => tmpDir),
+      activityLog: activityLog,
     );
     controller = TasksController(appState);
     await appState.save(
@@ -37,6 +39,9 @@ void main() {
   });
 
   tearDown(() async {
+    // O log é fire-and-forget; sem drenar, o delete do diretório corre
+    // contra um append em voo e falha com "Directory not empty" no Linux.
+    await activityLog.flush();
     await db.close();
     await tmpDir.delete(recursive: true);
   });

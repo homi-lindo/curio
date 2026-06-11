@@ -50,6 +50,12 @@ final class ActivityLogStore {
     return _tail;
   }
 
+  /// Aguarda todas as escritas já enfileiradas terminarem. O [append] é
+  /// fire-and-forget por design; quem precisa de uma fronteira — testes
+  /// apagando o diretório, teardown — espera aqui em vez de correr contra a
+  /// fila.
+  Future<void> flush() => _tail;
+
   Future<void> _rotateIfNeeded(File target) async {
     if (await target.length() <= maxBytes) {
       return;
