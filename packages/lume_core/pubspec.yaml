@@ -6,4 +6,5 @@ environment:
   sdk: ^3.12.0
 
 dependencies:
+  crypto: ^3.0.0
   timezone: ^0.11.0

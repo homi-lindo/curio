@@ -64,8 +64,11 @@ void keyboardZoomTests() {
         );
       } else {
         // Button may not be visible if NavigationRail is not shown at default size.
-        expect(tooltipFinder.evaluate().isEmpty, isTrue,
-            reason: 'Restaurar zoom encontrado mas nao como IconButton');
+        expect(
+          tooltipFinder.evaluate().isEmpty,
+          isTrue,
+          reason: 'Restaurar zoom encontrado mas nao como IconButton',
+        );
       }
     });
 

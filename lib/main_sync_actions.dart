@@ -199,6 +199,13 @@ mixin _SyncActions on State<CurioApp> {
         return;
       }
 
+      // Relógio quebrado neste aparelho dominaria o LWW dos outros; melhor
+      // recusar aqui, com mensagem acionável, do que contaminar o servidor.
+      const SnapshotTimestampGuard().check(
+        snapshot,
+        nowUtc: DateTime.now().toUtc(),
+      );
+
       final serverUrl = _syncSettingsValidator.normalizeServerUrl(
         _syncServerController.text,
       );
@@ -227,7 +234,20 @@ mixin _SyncActions on State<CurioApp> {
         );
         // Arm/cancel this device's local notifications for reminders that
         // arrived or disappeared in the merge.
-        final syncedSnapshot = await _reconcileReminders(mergedSnapshot);
+        final reconciled = await _reconcileReminders(mergedSnapshot);
+        // O reconcile aguarda o plugin de notificações; teclas digitadas
+        // nesse intervalo já estão em `_snapshot` e seriam revertidas se o
+        // resultado fosse salvo por cima. Funde o estado atual, mantendo os
+        // registros recém-reconciliados (ações que mexem em registros ficam
+        // bloqueadas pelo gate enquanto o sync roda).
+        final latestAfterReconcile = _snapshot ?? latestSnapshot;
+        final syncedSnapshot = identical(latestAfterReconcile, latestSnapshot)
+            ? reconciled
+            : const SnapshotSyncMerger()
+                  .merge(local: latestAfterReconcile, remote: reconciled)
+                  .copyWith(
+                    scheduledNotifications: reconciled.scheduledNotifications,
+                  );
         await _saveSnapshot(syncedSnapshot);
 
         final settings = _syncSettings.copyWith(

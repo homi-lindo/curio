@@ -111,6 +111,76 @@ END:VCALENDAR
       CalendarIcsRecurrenceKind.weekly,
     );
     expect(recurring.supportedRecurrence?.weekday, DateTime.friday);
+    expect(imported.warnings, isEmpty);
+  });
+
+  test('recorrência não suportada gera aviso e evento sem repetição', () {
+    const ics = '''
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:mensal-1
+SUMMARY:Fechamento mensal
+DTSTART:20260601T120000Z
+RRULE:FREQ=MONTHLY;BYMONTHDAY=1
+END:VEVENT
+BEGIN:VEVENT
+UID:multidia-1
+SUMMARY:Treino
+DTSTART:20260601T070000Z
+RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR
+END:VEVENT
+END:VCALENDAR
+''';
+
+    final imported = const CalendarIcsCodec().decode(ics);
+
+    expect(imported.events, hasLength(2));
+    expect(imported.events[0].supportedRecurrence, isNull);
+    expect(imported.events[1].supportedRecurrence, isNull);
+    expect(imported.warnings, hasLength(2));
+    expect(imported.warnings[0], contains('Fechamento mensal'));
+    expect(imported.warnings[0], contains('FREQ=MONTHLY'));
+    expect(imported.warnings[1], contains('Treino'));
+  });
+
+  test('TZID desconhecido gera aviso e cai para o fuso local', () {
+    const ics = '''
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:tz-1
+SUMMARY:Chamada externa
+DTSTART;TZID=Marte/Olympus:20260601T120000
+END:VEVENT
+END:VCALENDAR
+''';
+
+    final imported = const CalendarIcsCodec().decode(ics);
+
+    expect(imported.events, hasLength(1));
+    expect(imported.warnings, hasLength(1));
+    expect(imported.warnings.single, contains('Marte/Olympus'));
+    expect(imported.warnings.single, contains('fuso local'));
+  });
+
+  test('avisos repetidos são deduplicados', () {
+    final buffer = StringBuffer('BEGIN:VCALENDAR\nVERSION:2.0\n');
+    for (var index = 0; index < 5; index++) {
+      buffer.write('''
+BEGIN:VEVENT
+UID:tz-rep-$index
+SUMMARY:Evento $index
+DTSTART;TZID=Fuso/Inexistente:2026060${index + 1}T120000
+END:VEVENT
+''');
+    }
+    buffer.write('END:VCALENDAR\n');
+
+    final imported = const CalendarIcsCodec().decode(buffer.toString());
+
+    expect(imported.events, hasLength(5));
+    expect(imported.warnings, hasLength(1));
   });
 }
 

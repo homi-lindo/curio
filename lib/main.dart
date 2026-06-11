@@ -9,12 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
+import 'package:lume_core/sync/snapshot_timestamp_guard.dart';
 import 'package:lume_core/sync/sync_adapter.dart';
 import 'package:lume_core/sync/sync_pairing.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_brand.dart';
 import 'services/action_error_describer.dart';
+import 'services/activity_log_store.dart';
 import 'services/alarm_playback_service.dart';
 import 'services/alarm_settings_store.dart';
 import 'services/appearance_settings_store.dart';
@@ -29,8 +31,9 @@ import 'services/manual_backup_codec.dart';
 import 'services/note_edit_history_store.dart';
 import 'services/notification_service.dart';
 import 'services/notification_timezone_audit.dart';
-import 'services/snapshot_write_queue.dart';
 import 'services/sync_settings_store.dart';
+import 'state/app_state_controller.dart';
+import 'state/tasks_controller.dart';
 import 'services/sync_settings_validator.dart';
 import 'services/windows_attention_service.dart';
 import 'sync/http_sync_adapter.dart';
@@ -48,7 +51,6 @@ import 'ui/zoomed_page.dart';
 
 part 'main_backup_actions.dart';
 part 'main_sync_actions.dart';
-part 'main_task_actions.dart';
 
 Future<void> main() async {
   LumeWidgetsBinding.ensureInitialized();
@@ -70,15 +72,17 @@ final class CurioApp extends StatefulWidget {
     AlarmSettingsStore? alarmSettings,
     AlarmPlaybackService? alarmPlayback,
     NoteEditHistoryStore? noteHistory,
+    ActivityLogStore? activityLog,
   }) : store = store ?? LocalStore(),
        deviceIdentity = deviceIdentity ?? DeviceIdentityStore(),
        syncSettings = syncSettings ?? SyncSettingsStore(),
        appearanceSettings = appearanceSettings ?? AppearanceSettingsStore(),
        alarmSettings = alarmSettings ?? AlarmSettingsStore(),
        alarmPlayback = alarmPlayback ?? AlarmPlaybackService(),
-       noteHistory = noteHistory ?? NoteEditHistoryStore();
+       noteHistory = noteHistory ?? NoteEditHistoryStore(),
+       activityLog = activityLog ?? ActivityLogStore();
 
-  final NotificationService notifications;
+  final NotificationGateway notifications;
   final LocalStore store;
   final DeviceIdentityStore deviceIdentity;
   final SyncSettingsStore syncSettings;
@@ -86,13 +90,19 @@ final class CurioApp extends StatefulWidget {
   final AlarmSettingsStore alarmSettings;
   final AlarmPlaybackService alarmPlayback;
   final NoteEditHistoryStore noteHistory;
+  final ActivityLogStore activityLog;
 
   @override
   State<CurioApp> createState() => _CurioAppState();
 }
 
 final class _CurioAppState extends State<CurioApp>
-    with _TaskActions, _BackupActions, _SyncActions {
+    with _BackupActions, _SyncActions {
+  /// Janela do autosave do editor: curta o bastante para o usuário nunca
+  /// perceber, longa o bastante para coalescer a digitação contínua em uma
+  /// única escrita no banco.
+  static const Duration _noteAutosaveDelay = Duration(milliseconds: 500);
+
   late final Future<void> _startup;
   late final TextEditingController _noteController;
   @override
@@ -101,7 +111,8 @@ final class _CurioAppState extends State<CurioApp>
   late final TextEditingController _syncTokenController;
   @override
   late final LocalSyncSidecar _syncSidecar;
-  late final SnapshotWriteQueue _snapshotWrites;
+  late final AppStateController _appState;
+  late final TasksController _tasksController;
   final AsyncActionGate _actionGate = AsyncActionGate();
   @override
   final ActionErrorDescriber _errorDescriber = const ActionErrorDescriber();
@@ -131,18 +142,26 @@ final class _CurioAppState extends State<CurioApp>
   AlarmSettings _alarmSettings = const AlarmSettings();
   LocalSyncSidecarState? _syncSidecarState;
   SyncResult? _lastSyncResult;
+
+  /// O snapshot vive no [AppStateController]; o par getter/setter mantém o
+  /// contrato `_snapshot` que os mixins de ação declaram.
   @override
-  AppSnapshot? _snapshot;
+  AppSnapshot? get _snapshot => _appState.snapshot;
+  set _snapshot(AppSnapshot? value) => _appState.publish(value);
+
   String? _selectedNoteId;
   ScheduledNotificationRecord? _activeAlarmRecord;
   List<NoteEditRevision> _noteHistory = const <NoteEditRevision>[];
   final Map<String, DateTime> _lastHistoryAtByNote = <String, DateTime>{};
   final Map<int, Timer> _localAlarmTimers = <int, Timer>{};
+  Timer? _noteAutosaveDebounce;
+  bool _noteAutosaveDirty = false;
   NotificationPermissionState _permissionState =
       const NotificationPermissionState();
   bool _notificationComposerOpen = false;
   int _pendingCount = 0;
-  final List<String> _activity = <String>[];
+  List<String> get _activity => _appState.activity;
+  String? _activityLogPath;
 
   @override
   void initState() {
@@ -150,13 +169,27 @@ final class _CurioAppState extends State<CurioApp>
     _noteController = TextEditingController();
     _syncServerController = TextEditingController();
     _syncTokenController = TextEditingController();
-    _snapshotWrites = SnapshotWriteQueue(saveSnapshot: widget.store.save);
+    _appState = AppStateController(
+      store: widget.store,
+      activityLog: widget.activityLog,
+    );
+    _tasksController = TasksController(_appState);
+    // As views ainda recebem o estado por props: qualquer mudança publicada
+    // no controller vira um rebuild aqui até a migração view a view terminar.
+    _appState.addListener(() => _applyState(() {}));
     _syncSidecar = LocalSyncSidecar(
       loadSnapshot: () async => _snapshot ?? await widget.store.load(),
       saveSnapshot: (snapshot) async {
-        await _saveSnapshot(snapshot);
+        // O sidecar montou `snapshot` a partir de uma leitura anterior de
+        // `_snapshot`; edições locais feitas nesse meio-tempo (ex.: digitação
+        // no editor) precisam ser fundidas para não serem revertidas.
+        final latest = _snapshot;
+        final next = latest == null || identical(latest, snapshot)
+            ? snapshot
+            : const SnapshotSyncMerger().merge(local: latest, remote: snapshot);
+        await _saveSnapshot(next);
         if (mounted) {
-          setState(() => _syncSelectionAfterSnapshot(snapshot));
+          setState(() => _syncSelectionAfterSnapshot(next));
         }
       },
     );
@@ -165,6 +198,7 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   void dispose() {
+    _flushNoteAutosave();
     _noteController.dispose();
     _syncServerController.dispose();
     _syncTokenController.dispose();
@@ -174,6 +208,7 @@ final class _CurioAppState extends State<CurioApp>
     _localAlarmTimers.clear();
     unawaited(widget.alarmPlayback.stop());
     unawaited(_syncSidecar.stop());
+    _appState.dispose();
     super.dispose();
   }
 
@@ -184,6 +219,9 @@ final class _CurioAppState extends State<CurioApp>
     final alarmSettings = await widget.alarmSettings.load();
     final noteHistory = await widget.noteHistory.load();
     final loaded = await widget.store.load();
+    // O snapshot carregado espelha o banco: a partir daqui as escritas podem
+    // ir por diff em vez de replace completo.
+    _appState.prime(loaded);
     final nowUtc = DateTime.now().toUtc();
     // Backfill syncable reminders for notifications scheduled before reminders
     // were synced (e.g. data from an older app version), so the reconcile below
@@ -210,6 +248,12 @@ final class _CurioAppState extends State<CurioApp>
 
     final notificationsReady = await _initializeNotificationsSafely();
     await widget.store.file;
+    try {
+      final logFile = await widget.activityLog.file;
+      _applyState(() => _activityLogPath = logFile.path);
+    } on Object {
+      // Sem o caminho, a aba Sync apenas omite a linha do log.
+    }
     _log('armazenamento local pronto');
     _log('identidade local pronta');
     if (notificationsReady) {
@@ -883,6 +927,110 @@ final class _CurioAppState extends State<CurioApp>
     }
   }
 
+  // --- Tarefas -------------------------------------------------------------
+  // A lógica de domínio vive no TasksController (lib/state/); aqui fica só a
+  // cola de UI que a receita manda manter no host: prompts, pickers, diálogo
+  // de confirmação e navegação de aba.
+
+  void _setTaskFilter(TaskFilter filter) {
+    setState(() => _taskFilter = filter);
+  }
+
+  Future<void> _addTask() async {
+    final title = await _promptText(
+      title: 'Nova tarefa',
+      hint: 'Descrição da tarefa',
+      confirmLabel: 'Criar',
+    );
+    if (title == null || title.trim().isEmpty) {
+      return;
+    }
+    await _tasksController.create(title.trim());
+  }
+
+  Future<void> _createTaskFromSelectedNote() async {
+    final note = _selectedNote(_snapshot);
+    if (note == null) {
+      return;
+    }
+    await _tasksController.createFromNote(note);
+    _applyState(() => _selectedIndex = _AppTab.tasks.index);
+  }
+
+  Future<void> _toggleTaskDone(TaskItem task) {
+    return _tasksController.toggleDone(task);
+  }
+
+  Future<void> _renameTask(TaskItem task) async {
+    final title = await _promptText(
+      title: 'Renomear tarefa',
+      hint: 'Descrição da tarefa',
+      initialValue: task.title,
+      confirmLabel: 'Salvar',
+    );
+    if (title == null || title.trim().isEmpty) {
+      return;
+    }
+    await _tasksController.rename(task, title.trim());
+  }
+
+  Future<void> _setTaskDue(TaskItem task) async {
+    final initialLocal =
+        task.dueAtUtc?.toLocal() ??
+        defaultNotificationLocalForDate(DateTime.now());
+    final date = await showDatePicker(
+      context: _dialogContext,
+      initialDate: initialLocal,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2100),
+    );
+    if (date == null || !mounted) {
+      return;
+    }
+    final time = await showTimePicker(
+      context: _dialogContext,
+      initialTime: TimeOfDay.fromDateTime(initialLocal),
+    );
+    final dueLocal = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time?.hour ?? initialLocal.hour,
+      time?.minute ?? initialLocal.minute,
+    );
+    await _tasksController.setDue(task, dueLocal);
+  }
+
+  Future<void> _clearTaskDue(TaskItem task) {
+    return _tasksController.clearDue(task);
+  }
+
+  Future<void> _deleteTask(TaskItem task) async {
+    final confirmed = await showDialog<bool>(
+      context: _dialogContext,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Excluir tarefa'),
+          content: Text('Excluir "${task.title}"?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await _tasksController.delete(task, deviceId: _deviceId);
+  }
+
   void _setUiZoom(double value) {
     final clamped = clampPageZoom(value);
     setState(() => _uiZoom = clamped);
@@ -896,7 +1044,6 @@ final class _CurioAppState extends State<CurioApp>
     _setUiZoom(stepPageZoom(_uiZoom, steps));
   }
 
-  @override
   NoteItem? _selectedNote(AppSnapshot? snapshot) {
     final selectedNoteId = _selectedNoteId;
     if (snapshot == null || selectedNoteId == null) {
@@ -930,8 +1077,33 @@ final class _CurioAppState extends State<CurioApp>
         return note.copyWith(body: body, updatedAtUtc: now);
       }).toList(),
     );
+    // O texto digitado entra em `_snapshot` imediatamente (sync e demais ações
+    // leem daqui), mas a persistência é adiada: sem o debounce cada tecla
+    // reescreveria o banco inteiro via replaceSnapshot. Publicação silenciosa:
+    // rebuild por tecla seria desperdício.
+    _appState.publishSilently(next);
+    _noteAutosaveDirty = true;
+    _noteAutosaveDebounce?.cancel();
+    _noteAutosaveDebounce = Timer(_noteAutosaveDelay, _flushNoteAutosave);
+  }
+
+  /// Persists the latest in-memory snapshot if the note editor has unsaved
+  /// keystrokes. Safe to call at any time; saving the current `_snapshot` can
+  /// only re-write data that newer actions already persisted.
+  void _flushNoteAutosave() {
+    _noteAutosaveDebounce?.cancel();
+    _noteAutosaveDebounce = null;
+    if (!_noteAutosaveDirty) {
+      return;
+    }
+    _noteAutosaveDirty = false;
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
     unawaited(
-      _saveSnapshot(next).catchError((Object error, StackTrace stackTrace) {
+      _saveSnapshot(snapshot).catchError((Object error, StackTrace stackTrace) {
+        _noteAutosaveDirty = true;
         _log('nota não salva: ${_errorDescriber.describe(error)}');
       }),
     );
@@ -1020,7 +1192,12 @@ final class _CurioAppState extends State<CurioApp>
         : snapshot.notes.where((note) => note.id == selectedId).firstOrNull;
     final nextSelected = selected ?? snapshot.notes.firstOrNull;
     _selectedNoteId = nextSelected?.id;
-    _noteController.text = nextSelected?.body ?? '';
+    final nextBody = nextSelected?.body ?? '';
+    // Reatribuir o mesmo texto reposiciona o cursor no início — irritante
+    // quando um sync em segundo plano termina no meio da digitação.
+    if (_noteController.text != nextBody) {
+      _noteController.text = nextBody;
+    }
   }
 
   void _refreshLocalAlarmTimers(
@@ -1154,12 +1331,13 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   Future<void> _saveSnapshot(AppSnapshot snapshot) async {
-    await _snapshotWrites.save(snapshot);
+    // Os timers de alarme são domínio do widget (presos ao ciclo de vida do
+    // State); o resto — publicar em memória e enfileirar a escrita — é do
+    // controller.
     _refreshLocalAlarmTimers(snapshot.scheduledNotifications);
-    _applyState(() => _snapshot = snapshot);
+    await _appState.save(snapshot);
   }
 
-  @override
   Future<String?> _promptText({
     required String title,
     required String hint,
@@ -1201,20 +1379,7 @@ final class _CurioAppState extends State<CurioApp>
 
   @override
   void _log(String message) {
-    if (!mounted) {
-      _activity.insert(0, message);
-      if (_activity.length > 50) {
-        _activity.removeLast();
-      }
-      return;
-    }
-
-    setState(() {
-      _activity.insert(0, message);
-      if (_activity.length > 50) {
-        _activity.removeLast();
-      }
-    });
+    _appState.log(message);
   }
 
   @override
@@ -1392,6 +1557,7 @@ final class _CurioAppState extends State<CurioApp>
                   SyncView(
                     busy: _busy,
                     deviceId: _deviceId,
+                    activityLogPath: _activityLogPath,
                     controller: _syncServerController,
                     tokenController: _syncTokenController,
                     settings: _syncSettings,

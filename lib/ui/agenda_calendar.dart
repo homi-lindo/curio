@@ -169,40 +169,51 @@ final class _CalendarDayButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final foreground = selected ? scheme.onPrimary : scheme.onSurface;
-    return Material(
-      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
+    // Sem isto o leitor de tela anuncia só o número do dia (e o contador,
+    // sem contexto). A label descreve a célula inteira; excludeSemantics
+    // evita o anúncio duplicado dos Texts internos.
+    return Semantics(
+      button: true,
+      selected: selected,
+      excludeSemantics: true,
+      label:
+          '${date.day} de ${monthLabel(date.month)} de ${date.year}'
+          '${entryCount > 0 ? ', $entryCount item(ns)' : ''}',
+      child: Material(
+        color: selected ? scheme.primary : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Text(
-                    date.day.toString(),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: foreground,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  if (entryCount > 0) ...<Widget>[
-                    const SizedBox(width: 4),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
                     Text(
-                      entryCount.toString(),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: selected ? scheme.onPrimary : scheme.primary,
+                      date.day.toString(),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: foreground,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                    if (entryCount > 0) ...<Widget>[
+                      const SizedBox(width: 4),
+                      Text(
+                        entryCount.toString(),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: selected ? scheme.onPrimary : scheme.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

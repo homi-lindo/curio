@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:lume_core/domain/app_snapshot.dart';
 import 'package:lume_core/domain/reminder.dart';
 
@@ -100,6 +101,12 @@ final class ManualBackupCodec {
       buffer.writeln(payload.substring(index, end));
     }
     buffer.writeln(_backupEnd);
+    // Fora do bloco BEGIN/END de propósito: versões antigas do app ignoram
+    // tudo que está fora dos marcadores, então backups novos continuam
+    // restauráveis nelas.
+    buffer.writeln(
+      '$_backupChecksumPrefix${sha256.convert(utf8.encode(payload))}',
+    );
 
     return buffer.toString();
   }
@@ -120,8 +127,35 @@ final class ManualBackupCodec {
       throw const ManualBackupException('Bloco de restauração vazio.');
     }
 
+    // Backups com checksum são verificados antes de qualquer decodificação;
+    // base64 tolera truncamentos que só apareceriam como JSON parcial depois.
+    // Backups antigos, sem a linha de verificação, continuam aceitos.
+    final checksumMatch = _checksumPattern.firstMatch(
+      backupText.substring(end),
+    );
+    if (checksumMatch != null) {
+      final expected = checksumMatch.group(1)!.toLowerCase();
+      final actual = sha256.convert(utf8.encode(rawPayload)).toString();
+      if (actual != expected) {
+        throw const ManualBackupException(
+          'Backup TXT corrompido: a verificação SHA-256 não confere. '
+          'O arquivo foi alterado ou truncado depois de gerado.',
+        );
+      }
+    }
+
+    final List<int> payloadBytes;
     try {
-      final jsonText = utf8.decode(base64.decode(rawPayload));
+      payloadBytes = base64.decode(rawPayload);
+    } on FormatException {
+      throw const ManualBackupException(
+        'Backup TXT inválido: o bloco de restauração não é base64 válido '
+        '(arquivo alterado ou truncado).',
+      );
+    }
+
+    try {
+      final jsonText = utf8.decode(payloadBytes);
       final json = jsonDecode(jsonText);
       if (json is! Map) {
         throw const FormatException('raiz não é objeto');
@@ -223,3 +257,8 @@ String _formatTime(DateTime dateTime) {
 
 const _backupBegin = '-----BEGIN CURIO BACKUP DATA-----';
 const _backupEnd = '-----END CURIO BACKUP DATA-----';
+const _backupChecksumPrefix = 'Verificação SHA-256: ';
+final _checksumPattern = RegExp(
+  '^${RegExp.escape(_backupChecksumPrefix)}([0-9a-fA-F]{64})\\s*\$',
+  multiLine: true,
+);

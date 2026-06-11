@@ -34,6 +34,9 @@ android/*.keystore
 # is commented out by default.
 #.vscode/
 
+# Local toolchain (Flutter SDK colocado junto ao repo)
+/.tools/
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id

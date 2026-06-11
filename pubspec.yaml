@@ -47,6 +47,7 @@ dependencies:
   uuid: ^4.5.1
   file_picker: ^11.0.2
   audioplayers: ^6.6.0
+  markdown: ^7.3.1
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +56,8 @@ dev_dependencies:
     sdk: flutter
   lume_sync_server:
     path: server
+  # Usado direto nos testes de migração (DDL legado via setup do NativeDatabase).
+  sqlite3: ^3.3.2
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

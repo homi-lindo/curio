@@ -48,4 +48,35 @@ void main() {
 
     expect(selected, DateTime(2027, 5, 22));
   });
+
+  testWidgets('dias do calendário expõem semântica completa para leitores', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: AgendaCalendar(
+              selectedDate: DateTime(2026, 5, 21),
+              now: DateTime(2026, 5, 21),
+              dayCounts: <DateTime, int>{DateTime(2026, 5, 22): 2},
+              onDateSelected: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // O dia com itens anuncia a data completa e a contagem, não só "22".
+    expect(
+      find.bySemanticsLabel('22 de Mai de 2026, 2 item(ns)'),
+      findsOneWidget,
+    );
+    // Um dia comum anuncia a data completa.
+    expect(find.bySemanticsLabel('21 de Mai de 2026'), findsOneWidget);
+
+    handle.dispose();
+  });
 }

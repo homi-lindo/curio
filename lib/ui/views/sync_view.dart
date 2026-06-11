@@ -21,6 +21,7 @@ final class SyncView extends StatelessWidget {
     super.key,
     required this.busy,
     required this.deviceId,
+    this.activityLogPath,
     required this.controller,
     required this.tokenController,
     required this.settings,
@@ -51,6 +52,10 @@ final class SyncView extends StatelessWidget {
 
   final bool busy;
   final String deviceId;
+
+  /// Caminho do log de atividade em disco, para o usuário achar o arquivo ao
+  /// investigar um problema (ex.: alarme que não tocou).
+  final String? activityLogPath;
   final TextEditingController controller;
   final TextEditingController tokenController;
   final SyncSettings settings;
@@ -358,6 +363,8 @@ final class SyncView extends StatelessWidget {
                 ),
                 if (settings.lastMessage != null)
                   MetricLine('Status', settings.lastMessage!),
+                if (activityLogPath != null)
+                  MetricLine('Log de atividade', activityLogPath!),
               ],
             ),
           ),

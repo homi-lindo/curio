@@ -15,8 +15,12 @@ robustez, rapidez e um visual elegante, sem fluxo comercial.
   edição.
 - Agenda mensal com seleção inline de ano/mês/dia e abertura da edição do dia.
 - Quadro mensal com cards apenas para dias que possuem nota ou notificação.
-- Notas diárias e gerais com editor Markdown, barra de formatação e atalhos de
-  teclado.
+- Notas diárias e gerais com editor Markdown, barra de formatação, atalhos de
+  teclado e visualização opcional (lado a lado em janelas largas), renderizada
+  por um leitor próprio da AST do `package:markdown`.
+- Autosave do editor com debounce (~500ms): cada tecla atualiza a memória na
+  hora, a persistência coalesce e o fechamento dá flush no que estiver
+  pendente.
 - Lista de tarefas simples com filtros (abertas, hoje, com hora, feitas, todas),
   data/hora opcional, conclusão por checkbox e criação direta a partir da nota
   selecionada.
@@ -24,7 +28,13 @@ robustez, rapidez e um visual elegante, sem fluxo comercial.
 - Criação e edição inline de notificações, com título, data e hora editáveis.
 - Autosave das notas e histórico local de até 50 versões anteriores.
 - Backup manual em `.txt`, legível por humanos, com restauração funcional de
-  notas e notificações.
+  notas e notificações e linha de verificação SHA-256 (detecta arquivo
+  truncado/alterado; backups antigos sem a linha continuam restauráveis).
+- Importação de `.ics` com avisos explícitos de degradação (recorrência não
+  suportada, fuso desconhecido) na Atividade da aba Hoje.
+- Log de atividade persistente em `curio-activity.log` (rotação em 256KB),
+  com o caminho exibido na aba Sync — diagnóstico de "o alarme não tocou"
+  sobrevive ao fechamento do app.
 - Zoom de página de 20% a 200%, com suporte a gestos no Android, `Ctrl +`,
   `Ctrl -`, `Ctrl + rolagem` e reset de zoom.
 - Detecção automática de tema claro/escuro do sistema.
@@ -69,6 +79,22 @@ robustez, rapidez e um visual elegante, sem fluxo comercial.
 - `SnapshotSyncMerger` mescla notas, tarefas, lembretes (`ReminderIntent`) e
   tombstones, preservando edições mais novas (last-writer-wins por
   `updatedAtUtc`) e impedindo que registros apagados voltem por sync antigo.
+- Limitações conhecidas do LWW (escolha deliberada para uso pessoal):
+  o merge é por registro inteiro — se dois aparelhos editam campos diferentes
+  da mesma nota ao mesmo tempo, vence a edição com `updatedAtUtc` mais novo e
+  a outra se perde; timestamps idênticos resolvem pela ordem de processamento.
+  Relógio quebrado é barrado pelo `SnapshotTimestampGuard` (recusa local e
+  HTTP 400 no servidor para `updatedAtUtc`/`deletedAtUtc` além de `now+24h`),
+  mas skew menor que isso continua valendo como desempate.
+- O estado em memória vive no `AppStateController` (`lib/state/`), que publica
+  mudanças de forma síncrona e enfileira a persistência. As escritas vão por
+  diff (upserts/deletes por tabela) quando o último estado persistido é
+  conhecido, com fallback para o replace completo. A migração das views para
+  fora do `main.dart` está documentada em `docs/refatoracao-estado.md`.
+- Os servidores de sync (standalone e sidecar) atendem requisições
+  concorrentemente, mas serializam a seção read→merge→save com
+  `SerialTaskQueue`; as respostas de `/sync` e `/snapshot` expõem a `revision`
+  do estado (SHA-256 canônico) também como header `ETag`.
 - `compactSnapshot` limita o crescimento do estado a longo prazo: descarta
   tombstones com mais de 180 dias (`kTombstoneRetention`) e lembretes one-shot
   já disparados há mais de 30 dias (`kFiredReminderRetention`). Lembretes
@@ -101,20 +127,25 @@ artefatos publicados é Curió.
 
 ## Comandos úteis
 
-Execute a partir de `apps/lume`:
+Execute a partir da raiz do repositório. O SDK Flutter local fica em
+`.tools\flutter` (ignorado pelo git); com Flutter no PATH, troque o prefixo
+pelos comandos diretos.
 
 ```powershell
-..\..\.tools\flutter\bin\dart.bat format lib test integration_test packages server
-..\..\.tools\flutter\bin\dart.bat run build_runner build
-..\..\.tools\flutter\bin\flutter.bat analyze --no-pub
-..\..\.tools\flutter\bin\flutter.bat test --no-pub
-..\..\.tools\flutter\bin\flutter.bat test integration_test/app_test.dart -d 127.0.0.1:5555 --no-pub --timeout 120s
+.\.tools\flutter\bin\dart.bat format lib test integration_test packages server
+.\.tools\flutter\bin\dart.bat run build_runner build
+.\.tools\flutter\bin\flutter.bat analyze --no-pub
+.\.tools\flutter\bin\flutter.bat test --no-pub
+.\.tools\flutter\bin\flutter.bat test integration_test/app_test.dart -d 127.0.0.1:5555 --no-pub --timeout 120s
 ```
+
+O CI (GitHub Actions, `.github/workflows/ci.yml`) roda formatação, análise e
+os testes de unidade em todo push/PR.
 
 Para build Android de teste:
 
 ```powershell
-..\..\.tools\flutter\bin\flutter.bat build apk --release --no-pub
+.\.tools\flutter\bin\flutter.bat build apk --release --no-pub
 ```
 
 Para conferir a configuração pública de OAuth dos calendários:
@@ -173,7 +204,7 @@ Servidor direto, sem Docker:
 ```powershell
 Push-Location server
 $env:LUME_SYNC_TOKEN = "escolha-um-token-longo"
-..\..\..\.tools\flutter\bin\dart.bat run bin\lume_sync_server.dart --host 0.0.0.0 --port 8787
+..\.tools\flutter\bin\dart.bat run bin\lume_sync_server.dart --host 0.0.0.0 --port 8787
 Pop-Location
 ```
 
@@ -202,7 +233,7 @@ Windows direto (sem Docker): gere o certificado e o código com o helper:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\sync\gen-cert.ps1 -PublicHost 192.168.0.10 -Token "escolha-um-token-longo"
 Push-Location server
 $env:LUME_SYNC_TOKEN = "escolha-um-token-longo"
-..\..\..\.tools\flutter\bin\dart.bat run bin\lume_sync_server.dart --host 0.0.0.0 --port 8787 --tls-cert ..\.lume-sync\cert.pem --tls-key ..\.lume-sync\key.pem --public-host 192.168.0.10
+..\.tools\flutter\bin\dart.bat run bin\lume_sync_server.dart --host 0.0.0.0 --port 8787 --tls-cert ..\.lume-sync\cert.pem --tls-key ..\.lume-sync\key.pem --public-host 192.168.0.10
 Pop-Location
 ```
 

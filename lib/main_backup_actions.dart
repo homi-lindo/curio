@@ -84,6 +84,19 @@ mixin _BackupActions on State<CurioApp> {
       final import = _calendarIcsCodec.decode(await file.readAsString());
       await _applyCalendarImport(import);
       _log('agenda .ics importada: ${import.events.length} evento(s)');
+      for (final warning in import.warnings) {
+        _log('aviso do .ics: $warning');
+      }
+      if (import.warnings.isNotEmpty) {
+        _messengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Importação concluída com ${import.warnings.length} aviso(s) — '
+              'detalhes na Atividade da aba Hoje.',
+            ),
+          ),
+        );
+      }
     });
   }
 

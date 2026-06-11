@@ -23,9 +23,7 @@ void boardTests() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('navegacao de mes anterior e proximo funciona', (
-      tester,
-    ) async {
+    testWidgets('navegacao de mes anterior e proximo funciona', (tester) async {
       final harness = await pumpApp(tester);
       addTearDown(harness.dispose);
 
