@@ -65,10 +65,12 @@ O projeto está em fase de teste; feedback é muito bem-vindo nas
 
 ## Open source
 
-O Curió é **software livre e de código aberto**, sob a [licença MIT](LICENSE).
-Você pode ler, auditar, compilar e modificar cada linha — inclusive a do
-servidor de sincronização, para ter certeza do que roda na sua rede.
-Contribuições são bem-vindas via Issues e Pull Requests.
+O Curió é **software livre e de código aberto**, sob a
+[licença GPL-3.0](LICENSE). Você pode ler, auditar, compilar e modificar cada
+linha — inclusive a do servidor de sincronização, para ter certeza do que roda
+na sua rede. E, por ser *copyleft*, qualquer versão derivada distribuída
+precisa permanecer igualmente livre. Contribuições são bem-vindas via Issues e
+Pull Requests.
 
 Para compilar, arquitetura e detalhes técnicos, comece pelo
 [guia de desenvolvimento](docs/desenvolvimento.md). A política de privacidade
